@@ -1,0 +1,1 @@
+StreetPass lets devices share presence data with nearby users in a battery-efficient, privacy-preserving way. originally designed for the SCUFF social experience in barcelona, it’s now available for anyone building hyperlocal, real-time proximity features.
