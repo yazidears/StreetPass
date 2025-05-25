@@ -17,6 +17,7 @@ struct StreetPass_MainView: View {
             List {
                 Section {
                     MyEncounterCardView(card: viewModel.myCurrentCard)
+                        .padding(.vertical, 8)
 
                     Button(viewModel.isEditingMyCard ? "Manage My Card" : "Edit My Card") {
                         if viewModel.isEditingMyCard {
@@ -49,7 +50,7 @@ struct StreetPass_MainView: View {
                         }
                         .padding(.vertical, 5)
                     }
-                    .transition(.asymmetric(insertion: .offset(y: -15).combined(with: .opacity), removal: .offset(y: -15).combined(with: .opacity)))
+                    .transition(.asymmetric(insertion: .scale(scale: 0.95).combined(with: .opacity), removal: .scale(scale: 0.95).combined(with: .opacity)))
                 }
 
                 Section("System Controls") {
@@ -74,7 +75,7 @@ struct StreetPass_MainView: View {
                             NavigationLink(destination: ReceivedCardDetailView(card: card)) {
                                 ReceivedEncounterCardRowView(card: card)
                             }
-                            .padding(.vertical, 2)
+                             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 16))
                         }
                     }
                 }
@@ -93,15 +94,23 @@ struct StreetPass_MainView: View {
                     }
                 }
             }
-            .animation(.easeInOut(duration: 0.3), value: viewModel.isEditingMyCard)
+            .animation(.smooth(duration: 0.35), value: viewModel.isEditingMyCard)
             .navigationTitle("StreetPass")
             .navigationBarTitleDisplayMode(.inline)
-            .listStyle(.grouped)
+            .listStyle(.insetGrouped)
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarLeading) {
-                    Image(systemName: "camera")
+                    Image(systemName: "wave.3.left.circle.fill")
                         .font(.title2)
-                        .foregroundColor(AppTheme.primaryColor)
+                        .foregroundStyle(AppTheme.primaryColor.gradient)
+                }
+                 ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    Text(viewModel.myCurrentCard.userID.prefix(6))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .background(Material.ultraThin)
+                        .clipShape(Capsule())
                 }
             }
             .refreshable { viewModel.refreshUIDataFromPull() }
@@ -127,108 +136,168 @@ struct StreetPass_MainView: View {
     }
 }
 
+struct CardSectionHeader: View {
+    let title: String
+    let systemImage: String?
+
+    var body: some View {
+        HStack {
+            if let systemImage = systemImage {
+                Image(systemName: systemImage)
+                    .foregroundColor(AppTheme.secondaryColor)
+            }
+            Text(title)
+                .font(.headline)
+                .foregroundColor(AppTheme.primaryColor)
+            Spacer()
+        }
+        .padding(.bottom, 4)
+    }
+}
+
+struct CardDetailSection<Content: View>: View {
+    let title: String
+    let systemImage: String?
+    @ViewBuilder let content: Content
+
+    init(title: String, systemImage: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CardSectionHeader(title: title, systemImage: systemImage)
+            content
+        }
+        .padding()
+        .background(AppTheme.cardBackgroundColor)
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 3)
+    }
+}
+
+
 struct ReceivedCardDetailView: View {
     let card: EncounterCard
-    private let drawingDisplayMaxHeight: CGFloat = 200
+    private let drawingDisplayMaxHeight: CGFloat = 250
+    private let userColor: Color
+
+    init(card: EncounterCard) {
+        self.card = card
+        self.userColor = AppTheme.userSpecificColor(for: card.userID)
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 18) {
                 if let drawingUiImage = card.drawingImage {
                     Image(uiImage: drawingUiImage)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: drawingDisplayMaxHeight)
-                        .background(Color.gray.opacity(0.1))
-                        .cornerRadius(8)
-                        .shadow(color: Color.black.opacity(0.1), radius: 3, x: 0, y: 2)
-                        .padding(.bottom, 5)
+                        .background(Color.white)
+                        .cornerRadius(10)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(userColor.opacity(0.5), lineWidth: 2)
+                        )
+                        .shadow(color: userColor.opacity(0.3), radius: 6, x: 0, y: 4)
+                        .padding(.horizontal)
                 } else {
-                    HStack {
-                        Spacer()
-                        VStack {
-                            Image(systemName: "photo.on.rectangle.angled")
-                                .font(.system(size: 50))
-                                .foregroundColor(.secondary.opacity(0.4))
-                            Text("No Drawing Provided")
-                                .font(.callout)
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
+                    VStack {
+                        Image(systemName: "eye.slash.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(userColor.opacity(0.6))
+                        Text("No Drawing Shared")
+                            .font(.title3)
+                            .fontWeight(.medium)
+                            .foregroundColor(userColor.opacity(0.8))
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: drawingDisplayMaxHeight * 0.75)
-                    .background(Color.gray.opacity(0.05))
-                    .cornerRadius(8)
-                    .padding(.bottom, 5)
+                    .frame(maxWidth: .infinity, minHeight: drawingDisplayMaxHeight * 0.6)
+                    .background(userColor.opacity(0.1))
+                    .cornerRadius(10)
+                    .padding(.horizontal)
                 }
 
-                HStack(spacing: 15) {
+                VStack(spacing: 10) {
                     Image(systemName: card.avatarSymbolName)
-                        .font(.system(size: 50))
-                        .foregroundColor(AppTheme.userSpecificColor(for: card.userID))
-                        .frame(width: 60, height: 60)
-                        .background(AppTheme.userSpecificColor(for: card.userID).opacity(0.15))
+                        .font(.system(size: 60))
+                        .padding(15)
+                        .foregroundColor(userColor)
+                        .background(userColor.opacity(0.15).gradient)
                         .clipShape(Circle())
+                        .shadow(color: userColor.opacity(0.3), radius: 5, x:0, y:3)
 
-                    VStack(alignment: .leading) {
-                        Text(card.displayName)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        Text("\"\(card.statusMessage)\"")
-                            .font(.callout)
-                            .italic()
-                            .foregroundColor(.secondary)
-                            .lineLimit(4)
+                    Text(card.displayName)
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.primary)
+
+                    Text("\"\(card.statusMessage)\"")
+                        .font(.title3)
+                        .italic()
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                }
+                .padding(.horizontal)
+
+                if card.flairField1Title != nil || card.flairField1Value != nil || card.flairField2Title != nil || card.flairField2Value != nil {
+                    CardDetailSection(title: "Flair", systemImage: "sparkles") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty {
+                                FlairDisplayRow(title: t1, value: v1, icon: "rosette", iconColor: userColor)
+                            }
+                            if (card.flairField1Title != nil || card.flairField1Value != nil) && (card.flairField2Title != nil || card.flairField2Value != nil) {
+                                 Divider().padding(.vertical, 4)
+                            }
+                            if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty {
+                                FlairDisplayRow(title: t2, value: v2, icon: "star.circle", iconColor: userColor)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+
+                CardDetailSection(title: "Card Info", systemImage: "info.circle") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "person.text.rectangle").foregroundColor(userColor)
+                            Text("User ID: \(card.userID)")
+                                .font(.caption).foregroundColor(.secondary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }
+                        HStack {
+                             Image(systemName: "number.square").foregroundColor(userColor)
+                             Text("Schema Version: \(card.cardSchemaVersion)")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        HStack {
+                             Image(systemName: "clock.arrow.circlepath").foregroundColor(userColor)
+                             Text("Last Updated by User: \(card.lastUpdated, style: .datetime)")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
                     }
                 }
-                .padding(.top, 5)
-
-                Group {
-                    if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty {
-                        FlairDisplayRow(title: t1, value: v1)
-                    }
-                    if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty {
-                        FlairDisplayRow(title: t2, value: v2)
-                    }
-                }.padding(.leading, 5)
-
-                Divider().padding(.vertical, 8)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text("User ID:")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        Text("\(card.userID.prefix(12))...")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .monospaced()
-                    }
-                    HStack {
-                        Text("Schema Ver:")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        Text("\(card.cardSchemaVersion)")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
-                     HStack {
-                        Text("Last Updated:")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        Text("\(card.lastUpdated, style: .datetime)")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
+                .padding(.horizontal)
+                Spacer(minLength: 20)
+            }
+            .padding(.top)
+        }
+        .background(Color(UIColor.systemGray6).edgesIgnoringSafeArea(.all))
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+             ToolbarItem(placement: .principal) {
+                HStack {
+                    Image(systemName: card.avatarSymbolName).foregroundColor(userColor)
+                    Text(card.displayName).font(.headline)
                 }
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(AppTheme.backgroundColor.edgesIgnoringSafeArea(.all))
-        .navigationTitle(card.displayName)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -297,7 +366,7 @@ struct MessageView: View {
 
 struct MyEncounterCardView: View {
     let card: EncounterCard
-    private let drawingDisplayMaxHeight: CGFloat = 150
+    private let drawingDisplayMaxHeight: CGFloat = 180
 
     private func shouldShowFlairSection() -> Bool {
         let f1t = card.flairField1Title?.trimming ?? ""
@@ -308,97 +377,151 @@ struct MyEncounterCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let drawingUiImage = card.drawingImage {
-                Image(uiImage: drawingUiImage).resizable().scaledToFit()
-                    .frame(maxWidth: .infinity).frame(maxHeight: drawingDisplayMaxHeight)
-                    .background(Color.gray.opacity(0.1)).cornerRadius(8).padding(.bottom, 5)
-            } else {
-                HStack {
-                    Spacer()
-                    VStack {
-                        Image(systemName: "photo.on.rectangle.angled")
-                            .font(.largeTitle)
-                            .foregroundColor(.secondary.opacity(0.5))
-                        Text("No Drawing Yet")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .bottomLeading) {
+                if let drawingUiImage = card.drawingImage {
+                    Image(uiImage: drawingUiImage).resizable().scaledToFill()
+                        .frame(maxWidth: .infinity).frame(height: drawingDisplayMaxHeight)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(
+                            LinearGradient(
+                                gradient: Gradient(colors: [Color.black.opacity(0.4), Color.clear, Color.clear]),
+                                startPoint: .bottom,
+                                endPoint: .center
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        )
+                } else {
+                     RoundedRectangle(cornerRadius: 10)
+                        .fill(AppTheme.primaryColor.opacity(0.1).gradient)
+                        .frame(maxWidth: .infinity).frame(height: drawingDisplayMaxHeight * 0.6)
+                        .overlay(
+                            VStack {
+                                Image(systemName: "swirl.circle.righthalf.filled")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(AppTheme.primaryColor.opacity(0.7))
+                                Text("Your Drawing Shows Here")
+                                    .font(.callout)
+                                    .foregroundColor(AppTheme.primaryColor.opacity(0.9))
+                            }
+                        )
                 }
-                .frame(maxWidth: .infinity).frame(height: drawingDisplayMaxHeight / 1.5)
-                .background(Color.gray.opacity(0.05)).cornerRadius(8).padding(.bottom, 5)
+
+                HStack {
+                    Image(systemName: card.avatarSymbolName).font(.system(size: 30)).foregroundColor(.white)
+                        .padding(8)
+                        .background(AppTheme.primaryColor.opacity(0.7))
+                        .clipShape(Circle())
+                        .shadow(radius: 3)
+
+                    Text(card.displayName).font(.title2).fontWeight(.bold).foregroundColor(.white)
+                        .shadow(radius: 3)
+                }
+                .padding(12)
             }
 
-            HStack(spacing: 15) {
-                Image(systemName: card.avatarSymbolName).font(.system(size: 44)).foregroundColor(AppTheme.primaryColor)
-                    .frame(width: 50, height: 50).background(AppTheme.primaryColor.opacity(0.1)).clipShape(Circle())
-                VStack(alignment: .leading) {
-                    Text(card.displayName).font(.title3).fontWeight(.bold)
-                    Text("\"\(card.statusMessage)\"").font(.footnote).italic().foregroundColor(.secondary).lineLimit(3)
-                }
-            }
+            Text("\"\(card.statusMessage)\"").font(.callout).italic().foregroundColor(.secondary).lineLimit(3)
+                .padding(.horizontal, 4)
 
             if shouldShowFlairSection() {
-                if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty { FlairDisplayRow(title: t1, value: v1) }
-                if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty { FlairDisplayRow(title: t2, value: v2) }
+                 VStack(alignment: .leading, spacing: 6) {
+                    if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty { FlairDisplayRow(title: t1, value: v1) }
+                    if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty { FlairDisplayRow(title: t2, value: v2) }
+                 }
+                 .padding(.horizontal, 4)
             }
 
-            Divider().padding(.vertical, 2)
-            HStack { Text("ID: \(card.userID.prefix(8))..."); Spacer(); Text("Schema v\(card.cardSchemaVersion)") }
-            .font(.caption2).foregroundColor(.gray)
-            Text("Updated: \(card.lastUpdated, style: .relative) ago").font(.caption2).foregroundColor(.gray)
+            Divider()
+            HStack {
+                Text("My ID: \(card.userID.prefix(8))...").font(.caption2).foregroundColor(.gray)
+                Spacer()
+                Text("Card Updated: \(card.lastUpdated, style: .relative) ago").font(.caption2).foregroundColor(.gray)
+            }
+            .padding(.horizontal, 4)
         }
-        .padding().background(AppTheme.cardBackgroundColor).cornerRadius(10).shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 2)
+        .padding()
+        .background(AppTheme.cardBackgroundColor)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.1), radius: 6, x: 0, y: 4)
     }
 }
 
 struct FlairDisplayRow: View {
     let title: String?
     let value: String?
-    var body: some View {
-        if let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty,
-           let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
-            HStack(alignment: .top) {
-                Text(t + ":").font(.callout).fontWeight(.semibold).foregroundColor(AppTheme.secondaryColor.opacity(0.8))
-                Text(v).font(.callout).foregroundColor(.primary)
-            }
-        } else if let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
-             Text(v).font(.callout).italic().foregroundColor(.primary)
-        } else { EmptyView() }
-    }
-}
+    var icon: String? = nil
+    var iconColor: Color = AppTheme.secondaryColor
 
-struct ReceivedEncounterCardRowView: View {
-    let card: EncounterCard
-    private let drawingThumbnailSize: CGFloat = 50
     var body: some View {
-        let userColor = AppTheme.userSpecificColor(for: card.userID)
-        HStack(spacing: 12) {
-            if let img = card.drawingImage {
-                Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: drawingThumbnailSize, height: drawingThumbnailSize)
-                    .background(Color.gray.opacity(0.2))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                Image(systemName: card.avatarSymbolName).font(.title)
-                    .frame(width: drawingThumbnailSize, height: drawingThumbnailSize)
-                    .foregroundColor(userColor).background(userColor.opacity(0.2)).clipShape(Circle())
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(card.displayName).font(.headline).fontWeight(.semibold)
-                Text(card.statusMessage).font(.caption).foregroundColor(.secondary).lineLimit(2)
-                if let t = card.flairField1Title, let v = card.flairField1Value, !t.trimming.isEmpty || !v.trimming.isEmpty {
-                     Text("\(t.isEmpty ? "" : t + ": ")\(v)").font(.caption2).foregroundColor(userColor.opacity(0.9)).lineLimit(1)
+        Group {
+            if let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty,
+               let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    if let icon = icon {
+                         Image(systemName: icon).foregroundColor(iconColor.opacity(0.8)).frame(width: 20)
+                    }
+                    Text(t + ":").font(.callout).fontWeight(.medium).foregroundColor(AppTheme.secondaryColor)
+                    Text(v).font(.callout).foregroundColor(.primary).multilineTextAlignment(.leading)
+                    Spacer()
                 }
-                Text("Card updated: \(card.lastUpdated, style: .relative) ago")
-                    .font(.caption2)
-                    .foregroundColor(.gray)
-            }
-            Spacer()
+            } else if let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    if let icon = icon {
+                        Image(systemName: icon).foregroundColor(iconColor.opacity(0.8)).frame(width:20)
+                    }
+                    Text(v).font(.callout).italic().foregroundColor(.primary).multilineTextAlignment(.leading)
+                    Spacer()
+                }
+            } else { EmptyView() }
         }
     }
 }
+
+
+struct ReceivedEncounterCardRowView: View {
+    let card: EncounterCard
+    private let drawingThumbnailSize: CGFloat = 55
+    var body: some View {
+        let userColor = AppTheme.userSpecificColor(for: card.userID)
+        HStack(spacing: 15) {
+            Group {
+                if let img = card.drawingImage {
+                    Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: drawingThumbnailSize, height: drawingThumbnailSize)
+                        .background(Color.gray.opacity(0.2))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .shadow(radius: 2)
+                } else {
+                    Image(systemName: card.avatarSymbolName).font(.system(size: 28))
+                        .frame(width: drawingThumbnailSize, height: drawingThumbnailSize)
+                        .foregroundColor(userColor)
+                        .background(userColor.opacity(0.15).gradient)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .shadow(radius: 2)
+                }
+            }
+            .padding(.leading, 4)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(card.displayName).font(.headline).fontWeight(.semibold)
+                    .lineLimit(1)
+                Text(card.statusMessage).font(.caption).foregroundColor(.secondary).lineLimit(1).truncationMode(.tail)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.fill").font(.caption2).foregroundColor(.gray.opacity(0.7))
+                    Text("\(card.lastUpdated, style: .relative)")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundColor(.secondary.opacity(0.5))
+        }
+        .padding(.vertical, 6)
+    }
+}
+
 
 struct EncounterCardEditorView: View {
     @Binding var card: EncounterCard
@@ -520,49 +643,69 @@ struct EncounterCardEditorView: View {
 struct StreetPass_MainView_Previews: PreviewProvider {
     static var previews: some View {
         let previewVM = StreetPassViewModel(userID: "previewUser123")
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 150))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 225))
 
-        let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.boldSystemFont(ofSize: 18), .foregroundColor: UIColor.white]
+        let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.boldSystemFont(ofSize: 28), .foregroundColor: UIColor.white]
 
         let sampleDrawing = renderer.image { ctx in
-            UIColor.systemBlue.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 200, height: 150))
-            ("Sample Drawing" as NSString).draw(with: CGRect(x: 20, y: 60, width: 160, height: 30), options: .usesLineFragmentOrigin, attributes: attrs, context: nil)
+            UIColor.systemIndigo.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 300, height: 225))
+            let path = UIBezierPath(roundedRect: CGRect(x:10, y:10, width: 280, height: 205), cornerRadius: 12)
+            UIColor.white.withAlphaComponent(0.2).setStroke()
+            path.lineWidth = 5
+            path.stroke()
+            ("Modern UI" as NSString).draw(with: CGRect(x: 50, y: 90, width: 200, height: 40), options: .usesLineFragmentOrigin, attributes: attrs, context: nil)
         }
-        previewVM.bleManager.localUserCard.displayName = "My Drawn Card"
-        previewVM.bleManager.localUserCard.statusMessage = "This is my card with a drawing!"
+        previewVM.bleManager.localUserCard.displayName = "Designer Dave"
+        previewVM.bleManager.localUserCard.statusMessage = "Crafting beautiful interfaces and seamless experiences for all!"
         previewVM.bleManager.localUserCard.drawingData = sampleDrawing.pngData()
-        previewVM.bleManager.localUserCard.flairField1Title = "Mood"; previewVM.bleManager.localUserCard.flairField1Value = "Creative!"
-        previewVM.bleManager.localUserCard.flairField2Title = "Project"; previewVM.bleManager.localUserCard.flairField2Value = "StreetPass App"
+        previewVM.bleManager.localUserCard.avatarSymbolName = "paintbrush.fill"
+        previewVM.bleManager.localUserCard.flairField1Title = "Software"; previewVM.bleManager.localUserCard.flairField1Value = "SwiftUI, Figma"
+        previewVM.bleManager.localUserCard.flairField2Title = "Likes"; previewVM.bleManager.localUserCard.flairField2Value = "Clean Code, Good Coffee, Pixel Perfection"
 
 
-        var sampleCard1 = EncounterCard(userID: "userA", displayName: "Artist Anna", statusMessage: "Drawing all day and exploring the world of digital art!", avatarSymbolName: "paintbrush.fill")
+        var sampleCard1 = EncounterCard(userID: "userA", displayName: "Artist Anna", statusMessage: "Drawing all day and exploring the world of digital art!", avatarSymbolName: "camera.macro")
         sampleCard1.flairField1Title = "Tool"; sampleCard1.flairField1Value = "iPad & Pencil"
-        sampleCard1.flairField2Title = "Focus"; sampleCard1.flairField2Value = "Portraits"
-        let anotherDrawing = renderer.image { ctx in UIColor.systemGreen.setFill(); ctx.fill(CGRect(x:0,y:0,width:200,height:150)); ("Hi!" as NSString).draw(at: CGPoint(x:80, y:60), withAttributes: attrs)}
-        sampleCard1.drawingData = anotherDrawing.jpegData(compressionQuality: 0.7)
-        sampleCard1.lastUpdated = Calendar.current.date(byAdding: .minute, value: -5, to: Date())!
+        sampleCard1.flairField2Title = "Inspiration"; sampleCard1.flairField2Value = "Nature, Dreams, Technology"
+        let anotherDrawing = renderer.image { ctx in
+            let gradColors = [UIColor.systemPink.cgColor, UIColor.systemPurple.cgColor]
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let gradient = CGGradient(colorsSpace: colorSpace, colors: gradColors as CFArray, locations: [0.0, 1.0])!
+            ctx.cgContext.drawLinearGradient(gradient, start: CGPoint.zero, end: CGPoint(x:0, y:225), options: [])
+             ("Art <3" as NSString).draw(at: CGPoint(x:100, y:90), withAttributes: attrs)
+        }
+        sampleCard1.drawingData = anotherDrawing.jpegData(compressionQuality: 0.8)
+        sampleCard1.lastUpdated = Calendar.current.date(byAdding: .minute, value: -15, to: Date())!
 
 
-        var sampleCard2 = EncounterCard(userID: "userB", displayName: "Text Tom", statusMessage: "Old school, text only! Always up for a good chat.", avatarSymbolName: "text.bubble.fill")
-        sampleCard2.lastUpdated = Calendar.current.date(byAdding: .hour, value: -2, to: Date())!
+        var sampleCard2 = EncounterCard(userID: "userB", displayName: "Gamer Greg", statusMessage: "Always up for a co-op adventure or a competitive match. What are you playing?", avatarSymbolName: "gamecontroller.fill")
+        sampleCard2.flairField1Title = "Favorite Genres"; sampleCard2.flairField1Value = "RPG, Strategy, Indie"
+        sampleCard2.flairField2Title = "Current Game"; sampleCard2.flairField2Value = "CyberQuest X"
+        sampleCard2.lastUpdated = Calendar.current.date(byAdding: .hour, value: -3, to: Date())!
 
-        var sampleCard3 = EncounterCard(userID: "userC", displayName: "Newbie Nick", statusMessage: "Just joined! Excited to meet everyone.", avatarSymbolName: "figure.wave")
-        sampleCard3.lastUpdated = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        var sampleCard3 = EncounterCard(userID: "userC", displayName: "Explorer Eve", statusMessage: "Just joined! Excited to meet everyone and share travel stories.", avatarSymbolName: "map.fill")
+        sampleCard3.lastUpdated = Calendar.current.date(byAdding: .day, value: -2, to: Date())!
 
 
-        previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2, sampleCard3]
+        previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2, sampleCard3].sorted(by: { $0.lastUpdated > $1.lastUpdated })
         previewVM.bleManager.isBluetoothPoweredOn = true; previewVM.bleManager.isScanning = true
 
         previewVM.prepareCardForEditing()
 
         return Group {
             StreetPass_MainView(viewModel: previewVM)
+                .previewDisplayName("Main View (Refreshed)")
 
-            ReceivedCardDetailView(card: sampleCard1)
-                .previewDisplayName("Received Card Detail Preview (With Drawing)")
+            NavigationView {
+                ReceivedCardDetailView(card: sampleCard1)
+            }.previewDisplayName("Received Card Detail (Anna)")
 
-            ReceivedCardDetailView(card: sampleCard2)
-                 .previewDisplayName("Received Card Detail Preview (No Drawing)")
+            NavigationView {
+                ReceivedCardDetailView(card: previewVM.myCurrentCard)
+            }.previewDisplayName("My Card Detail (Dave - similar view)")
+
+            NavigationView {
+                 ReceivedCardDetailView(card: sampleCard2)
+            }.previewDisplayName("Received Card Detail (Greg - No Drawing)")
         }
     }
 }
@@ -572,4 +715,4 @@ fileprivate extension String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-// i added a detail view for tapped received encounter cards, allowing users to see full card information
+// MAJOR ui refresh (finally) for mycardview, receivedcardrowview, and receivedcarddetailview, focusing on modern aesthetics, better layouts, and visual hierarchy for a more engaging user experience
