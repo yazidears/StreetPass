@@ -16,7 +16,7 @@ struct StreetPass_MainView: View {
             List {
                 Section {
                     MyEncounterCardView(card: viewModel.myCurrentCard)
-                    
+
                     Button(viewModel.isEditingMyCard ? "Manage My Card" : "Edit My Card") {
                         if viewModel.isEditingMyCard {
                         } else {
@@ -48,11 +48,12 @@ struct StreetPass_MainView: View {
                         }
                         .padding(.vertical, 5)
                     }
+                    .transition(.asymmetric(insertion: .offset(y: -15).combined(with: .opacity), removal: .offset(y: -15).combined(with: .opacity)))
                 }
 
                 Section("System Controls") {
                     StreetPassControlsView(viewModel: viewModel)
-                    
+
                     if let errorMsg = viewModel.lastErrorMessage {
                         MessageView(message: errorMsg, type: .error)
                     } else if let infoMsg = viewModel.lastInfoMessage {
@@ -89,6 +90,7 @@ struct StreetPass_MainView: View {
                     }
                 }
             }
+            .animation(.easeInOut(duration: 0.3), value: viewModel.isEditingMyCard)
             .navigationTitle("StreetPass")
             .navigationBarTitleDisplayMode(.inline)
             .listStyle(.grouped)
@@ -132,7 +134,7 @@ struct StreetPassControlsView: View {
                 }
                 .buttonStyle(.bordered).tint(AppTheme.negativeColor).frame(maxWidth: .infinity)
             }
-            
+
             HStack {
                 StatusIndicatorView(label: "Bluetooth", isOn: viewModel.isBluetoothOn); Spacer()
                 StatusIndicatorView(label: "Scanning", isOn: viewModel.isScanningActive); Spacer()
@@ -160,7 +162,7 @@ struct MessageView: View {
     let message: String
     enum MessageType { case info, error, warning }
     let type: MessageType
-    
+
     private var fgColor: Color {
         switch type {
         case .info: return AppTheme.infoColor
@@ -178,7 +180,7 @@ struct MessageView: View {
 struct MyEncounterCardView: View {
     let card: EncounterCard
     private let drawingDisplayMaxHeight: CGFloat = 150
-    
+
     private func shouldShowFlairSection() -> Bool {
         let f1t = card.flairField1Title?.trimming ?? ""
         let f1v = card.flairField1Value?.trimming ?? ""
@@ -209,7 +211,7 @@ struct MyEncounterCardView: View {
                 .frame(maxWidth: .infinity).frame(height: drawingDisplayMaxHeight / 1.5)
                 .background(Color.gray.opacity(0.05)).cornerRadius(8).padding(.bottom, 5)
             }
-            
+
             HStack(spacing: 15) {
                 Image(systemName: card.avatarSymbolName).font(.system(size: 44)).foregroundColor(AppTheme.primaryColor)
                     .frame(width: 50, height: 50).background(AppTheme.primaryColor.opacity(0.1)).clipShape(Circle())
@@ -218,12 +220,12 @@ struct MyEncounterCardView: View {
                     Text("\"\(card.statusMessage)\"").font(.footnote).italic().foregroundColor(.secondary).lineLimit(3)
                 }
             }
-            
+
             if shouldShowFlairSection() {
                 if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty { FlairDisplayRow(title: t1, value: v1) }
                 if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty { FlairDisplayRow(title: t2, value: v2) }
             }
-            
+
             Divider().padding(.vertical, 2)
             HStack { Text("ID: \(card.userID.prefix(8))..."); Spacer(); Text("Schema v\(card.cardSchemaVersion)") }
             .font(.caption2).foregroundColor(.gray)
@@ -285,7 +287,7 @@ struct EncounterCardEditorView: View {
     @Binding var card: EncounterCard
     var onOpenDrawingEditor: () -> Void
     var onRemoveDrawing: () -> Void
-    
+
     private let avatarOptions: [String] = [
         "person.fill", "person.crop.circle.fill", "face.smiling.fill", "star.fill",
         "heart.fill", "gamecontroller.fill", "music.note", "book.fill",
@@ -350,7 +352,7 @@ struct EncounterCardEditorView: View {
                 }
             }
             Text("Avatar shown if no drawing exists or in compact views.").font(.caption2).foregroundColor(.gray)
-            
+
             FlairEditorSection(
                 titleBinding1: titleBinding(for: \.flairField1Title),
                 valueBinding1: valueBinding(for: \.flairField1Value),
@@ -402,7 +404,7 @@ struct StreetPass_MainView_Previews: PreviewProvider {
     static var previews: some View {
         let previewVM = StreetPassViewModel(userID: "previewUser123")
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 150))
-        
+
         let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.boldSystemFont(ofSize: 18), .foregroundColor: UIColor.white]
 
         let sampleDrawing = renderer.image { ctx in
@@ -425,17 +427,15 @@ struct StreetPass_MainView_Previews: PreviewProvider {
 
         var sampleCard2 = EncounterCard(userID: "userB", displayName: "Text Tom", statusMessage: "Old school, text only!", avatarSymbolName: "text.bubble.fill")
         sampleCard2.lastUpdated = Calendar.current.date(byAdding: .hour, value: -2, to: Date())!
-        
+
         var sampleCard3 = EncounterCard(userID: "userC", displayName: "Newbie Nick", statusMessage: "Just joined!", avatarSymbolName: "figure.wave")
         sampleCard3.lastUpdated = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
 
 
         previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2, sampleCard3]
         previewVM.bleManager.isBluetoothPoweredOn = true; previewVM.bleManager.isScanning = true
-        
-        previewVM.prepareCardForEditing() 
-        // previewVM.cardForEditor.displayName = "" 
 
+        previewVM.prepareCardForEditing()
 
         return StreetPass_MainView(viewModel: previewVM)
     }
@@ -446,4 +446,4 @@ fileprivate extension String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-// i added four helper methods: formattedEncountersSectionHeader in streetpass_mainview, shouldShowFlairSection in myencountercardview, and isDisplayNameValid & characterCountColor in encountercardeditorview for improved code organization and minor ui hints
+// i added a subtle animation for the card editor section appearing and disappearing
