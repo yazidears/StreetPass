@@ -4,13 +4,66 @@ struct StreetPass_MainView: View {
     @StateObject var viewModel: StreetPassViewModel
     @State private var showingClearEncountersAlert: Bool = false
 
-    private func formattedEncountersSectionHeader() -> String {
-        if viewModel.recentlyEncounteredCards.isEmpty {
-            return "Recent Encounters"
-        } else {
-            return "Recent Encounters (\(viewModel.recentlyEncounteredCards.count))"
+    @State private var searchText: String = ""
+    @State private var sortOption: SortOption = .lastUpdatedDescending
+
+    enum SortOption: String, CaseIterable, Identifiable {
+        case lastUpdatedDescending = "Date (Newest First)"
+        case lastUpdatedAscending = "Date (Oldest First)"
+        case nameAscending = "Name (A-Z)"
+        case nameDescending = "Name (Z-A)"
+
+        var id: String { self.rawValue }
+    }
+
+    private var filteredAndSortedCards: [EncounterCard] {
+        let filtered = viewModel.recentlyEncounteredCards.filter { card in
+            if searchText.isEmpty {
+                return true
+            }
+            let lowercasedSearchText = searchText.lowercased()
+            return card.displayName.lowercased().contains(lowercasedSearchText) ||
+                   card.statusMessage.lowercased().contains(lowercasedSearchText) ||
+                   (card.flairField1Title?.lowercased().contains(lowercasedSearchText) ?? false) ||
+                   (card.flairField1Value?.lowercased().contains(lowercasedSearchText) ?? false) ||
+                   (card.flairField2Title?.lowercased().contains(lowercasedSearchText) ?? false) ||
+                   (card.flairField2Value?.lowercased().contains(lowercasedSearchText) ?? false)
+        }
+
+        switch sortOption {
+        case .lastUpdatedDescending:
+            return filtered.sorted { $0.lastUpdated > $1.lastUpdated }
+        case .lastUpdatedAscending:
+            return filtered.sorted { $0.lastUpdated < $1.lastUpdated }
+        case .nameAscending:
+            return filtered.sorted { $0.displayName.lowercased() < $1.displayName.lowercased() }
+        case .nameDescending:
+            return filtered.sorted { $0.displayName.lowercased() > $1.displayName.lowercased() }
         }
     }
+
+    private func encountersSectionHeaderView() -> some View {
+        HStack {
+            Text("Recent Encounters")
+                .font(.headline)
+                .foregroundColor(AppTheme.primaryColor)
+            Spacer()
+             if !viewModel.recentlyEncounteredCards.isEmpty {
+                Menu {
+                    Picker("Sort By", selection: $sortOption) {
+                        ForEach(SortOption.allCases) { option in
+                            Text(option.rawValue).tag(option)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "arrow.up.arrow.down.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(AppTheme.primaryColor)
+                }
+            }
+        }
+    }
+
 
     var body: some View {
         NavigationView {
@@ -63,22 +116,56 @@ struct StreetPass_MainView: View {
                     }
                 }
 
-                Section(formattedEncountersSectionHeader()) {
+                Section {
+                    if !viewModel.recentlyEncounteredCards.isEmpty {
+                        TextField("Search encounters...", text: $searchText)
+                            .padding(.vertical, 8)
+                            .textFieldStyle(.roundedBorder)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                    }
+
                     if viewModel.recentlyEncounteredCards.isEmpty {
                         Text("No cards received yet. Activate StreetPass and explore!")
                             .foregroundColor(.secondary)
                             .padding()
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
+                    } else if filteredAndSortedCards.isEmpty {
+                         VStack(alignment: .center, spacing: 8) {
+                             Image(systemName: "magnifyingglass.circle")
+                                 .font(.system(size: 40))
+                                 .foregroundColor(.secondary.opacity(0.5))
+                            Text("No Encounters Match")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Text(searchText.isEmpty ? "Try a different sort option." : "Try adjusting your search or sort criteria.")
+                                .font(.caption)
+                                .foregroundColor(.secondary.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity)
                     } else {
-                        ForEach(viewModel.recentlyEncounteredCards) { card in
+                        ForEach(filteredAndSortedCards) { card in
                             NavigationLink(destination: ReceivedCardDetailView(card: card)) {
                                 ReceivedEncounterCardRowView(card: card)
                             }
                              .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 16))
                         }
+                        if !searchText.isEmpty || sortOption != .lastUpdatedDescending {
+                            HStack {
+                                Spacer()
+                                Text("Showing \(filteredAndSortedCards.count) of \(viewModel.recentlyEncounteredCards.count) encounters")
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                                Spacer()
+                            }.padding(.vertical, 4)
+                        }
                     }
+                } header: {
+                   encountersSectionHeaderView()
                 }
+
 
                 Section("Activity Log (Last 50)") {
                     if viewModel.bleActivityLog.isEmpty {
@@ -95,6 +182,7 @@ struct StreetPass_MainView: View {
                 }
             }
             .animation(.smooth(duration: 0.35), value: viewModel.isEditingMyCard)
+            .animation(.default, value: filteredAndSortedCards)
             .navigationTitle("StreetPass")
             .navigationBarTitleDisplayMode(.inline)
             .listStyle(.insetGrouped)
@@ -685,27 +773,25 @@ struct StreetPass_MainView_Previews: PreviewProvider {
         var sampleCard3 = EncounterCard(userID: "userC", displayName: "Explorer Eve", statusMessage: "Just joined! Excited to meet everyone and share travel stories.", avatarSymbolName: "map.fill")
         sampleCard3.lastUpdated = Calendar.current.date(byAdding: .day, value: -2, to: Date())!
 
+        var sampleCard4 = EncounterCard(userID: "userD", displayName: "Zen Zack", statusMessage: "Mindfulness and meditation. Finding peace in the everyday.", avatarSymbolName: "timelapse")
+        sampleCard4.flairField1Title = "Practice"; sampleCard4.flairField1Value = "Vipassanā"
+        sampleCard4.lastUpdated = Calendar.current.date(byAdding: .hour, value: -1, to: Date())!
 
-        previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2, sampleCard3].sorted(by: { $0.lastUpdated > $1.lastUpdated })
+
+
+        previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2, sampleCard3, sampleCard4].sorted(by: { $0.lastUpdated > $1.lastUpdated })
         previewVM.bleManager.isBluetoothPoweredOn = true; previewVM.bleManager.isScanning = true
 
         previewVM.prepareCardForEditing()
 
         return Group {
             StreetPass_MainView(viewModel: previewVM)
-                .previewDisplayName("Main View (Refreshed)")
+                .previewDisplayName("Main View (Filtering/Sorting)")
 
             NavigationView {
                 ReceivedCardDetailView(card: sampleCard1)
             }.previewDisplayName("Received Card Detail (Anna)")
 
-            NavigationView {
-                ReceivedCardDetailView(card: previewVM.myCurrentCard)
-            }.previewDisplayName("My Card Detail (Dave - similar view)")
-
-            NavigationView {
-                 ReceivedCardDetailView(card: sampleCard2)
-            }.previewDisplayName("Received Card Detail (Greg - No Drawing)")
         }
     }
 }
@@ -715,4 +801,4 @@ fileprivate extension String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-// MAJOR ui refresh (finally) for mycardview, receivedcardrowview, and receivedcarddetailview, focusing on modern aesthetics, better layouts, and visual hierarchy for a more engaging user experience
+// i added filtering and sorting capabilities to the recent encounters list for improved usability
