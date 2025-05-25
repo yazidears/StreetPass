@@ -1,5 +1,21 @@
 import SwiftUI
-import UniformTypeIdentifiers // Required for UIPasteboard
+import UniformTypeIdentifiers
+
+struct ShareSheetView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: applicationActivities
+        )
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {
+    }
+}
 
 struct StreetPass_MainView: View {
     @StateObject var viewModel: StreetPassViewModel
@@ -8,6 +24,9 @@ struct StreetPass_MainView: View {
     @State private var searchText: String = ""
     @State private var sortOption: SortOption = .lastUpdatedDescending
     @State private var showingFavoritesOnly: Bool = false
+    @State private var showingShareSheet: Bool = false
+    @State private var shareItems: [Any] = []
+
 
     @AppStorage("favorite_user_ids_json_v1") private var favoriteUserIDsJSON: String = "[]"
 
@@ -83,6 +102,35 @@ struct StreetPass_MainView: View {
         }
     }
 
+    private func myCardSectionHeaderView() -> some View {
+        HStack {
+            Text("My StreetPass Card")
+                .font(.headline)
+                .foregroundColor(AppTheme.primaryColor)
+            Spacer()
+            Button {
+                let card = viewModel.myCurrentCard
+                let appStoreURLPlaceholder = "https://apps.apple.com/app/your-app-id"
+                var textToShare = """
+                StreetPass Card: \(card.displayName)
+                Status: \(card.statusMessage)
+                """
+                if let drawing = card.drawingImage {
+                    shareItems.append(drawing)
+                    textToShare += "\n(Includes my drawing!)"
+                }
+                textToShare += "\n\nGet StreetPass: \(appStoreURLPlaceholder)"
+                shareItems.insert(textToShare, at: 0)
+
+                showingShareSheet = true
+            } label: {
+                Image(systemName: "square.and.arrow.up.circle.fill")
+                    .font(.title3)
+                    .foregroundColor(AppTheme.primaryColor)
+            }
+        }
+    }
+
     private func encountersSectionHeaderView() -> some View {
         HStack {
             Text("Recent Encounters")
@@ -136,9 +184,7 @@ struct StreetPass_MainView: View {
                     .tint(AppTheme.primaryColor)
                     .frame(maxWidth: .infinity, alignment: .center)
                 } header: {
-                    Text("My StreetPass Card")
-                        .font(.headline)
-                        .foregroundColor(AppTheme.primaryColor)
+                    myCardSectionHeaderView()
                 }
 
                 if viewModel.isEditingMyCard {
@@ -280,6 +326,12 @@ struct StreetPass_MainView: View {
             } message: {
                 Text("Are you sure you want to delete all encountered cards? This action cannot be undone.")
             }
+            .sheet(isPresented: $showingShareSheet) {
+                ShareSheetView(activityItems: shareItems)
+                    .onDisappear {
+                        shareItems = [] // Clear items after dismissal
+                    }
+            }
         }
         .accentColor(AppTheme.primaryColor)
         .navigationViewStyle(.stack)
@@ -338,8 +390,8 @@ struct CardDetailSection<Content: View>: View {
 
 struct ReceivedCardDetailView: View {
     let card: EncounterCard
-    @State var isFavorite: Bool // Pass initial state
-    let toggleFavoriteAction: () -> Void // Action to call
+    @State var isFavorite: Bool
+    let toggleFavoriteAction: () -> Void
 
     private let drawingDisplayMaxHeight: CGFloat = 250
     private let userColor: Color
@@ -462,7 +514,7 @@ struct ReceivedCardDetailView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     toggleFavoriteAction()
-                    isFavorite.toggle() // Update local state for immediate UI feedback
+                    isFavorite.toggle()
                 } label: {
                     Label(isFavorite ? "Unfavorite" : "Favorite", systemImage: isFavorite ? "star.fill" : "star")
                 }
@@ -878,17 +930,16 @@ struct StreetPass_MainView_Previews: PreviewProvider {
         previewVM.prepareCardForEditing()
 
         let mainViewWithFavorites = StreetPass_MainView(viewModel: previewVM)
-        mainViewWithFavorites.favoriteUserIDs = ["userA", "userC"] // Pre-favorite some for preview
+        mainViewWithFavorites.favoriteUserIDs = ["userA", "userC"]
 
 
         return Group {
             mainViewWithFavorites
-                .previewDisplayName("Main View (Favorites System)")
+                .previewDisplayName("Main View (Share & Favorites)")
 
             NavigationView {
-                // Ensure preview works for detail view by manually passing favorite state
-                ReceivedCardDetailView(card: sampleCard1, isFavorite: true, toggleFavoriteAction: { print("Preview Toggle Fav for Anna") } )
-            }.previewDisplayName("Detail View (Anna - Favorited)")
+                ReceivedCardDetailView(card: sampleCard1, isFavorite: mainViewWithFavorites.isFavorite(userID: "userA"), toggleFavoriteAction: { mainViewWithFavorites.toggleFavorite(userID: "userA") } )
+            }.previewDisplayName("Detail View (Anna - Favorite)")
 
         }
     }
@@ -899,4 +950,4 @@ fileprivate extension String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-//i added a favorites system allowing users to mark/unmark cards, filter by favorites, and manage them via context menus and detail view, with persistence using @appstorage
+//i added a feature to share my card details (and drawing if available) via the ios share sheet, accessible from a new button in the 'my streetpass card' section header
