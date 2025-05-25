@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StreetPass_MainView: View {
     @StateObject var viewModel: StreetPassViewModel
+    @State private var showingClearEncountersAlert: Bool = false
 
     private func formattedEncountersSectionHeader() -> String {
         if viewModel.recentlyEncounteredCards.isEmpty {
@@ -52,7 +53,7 @@ struct StreetPass_MainView: View {
                 }
 
                 Section("System Controls") {
-                    StreetPassControlsView(viewModel: viewModel)
+                    StreetPassControlsView(viewModel: viewModel, showingClearAlert: $showingClearEncountersAlert)
 
                     if let errorMsg = viewModel.lastErrorMessage {
                         MessageView(message: errorMsg, type: .error)
@@ -103,6 +104,14 @@ struct StreetPass_MainView: View {
             }
             .refreshable { viewModel.refreshUIDataFromPull() }
             .background(AppTheme.backgroundColor.edgesIgnoringSafeArea(.all))
+            .alert("Confirm Clear", isPresented: $showingClearEncountersAlert) {
+                Button("Clear All Encounters", role: .destructive) {
+                    viewModel.clearAllEncounteredCards()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Are you sure you want to delete all encountered cards? This action cannot be undone.")
+            }
         }
         .accentColor(AppTheme.primaryColor)
         .navigationViewStyle(.stack)
@@ -118,6 +127,7 @@ struct StreetPass_MainView: View {
 
 struct StreetPassControlsView: View {
     @ObservedObject var viewModel: StreetPassViewModel
+    @Binding var showingClearAlert: Bool
     var body: some View {
         VStack(spacing: 12) {
             Button { viewModel.toggleStreetPassServices() } label: {
@@ -129,7 +139,7 @@ struct StreetPassControlsView: View {
             .frame(maxWidth: .infinity)
 
             if !viewModel.recentlyEncounteredCards.isEmpty {
-                Button { viewModel.clearAllEncounteredCards() } label: {
+                Button { showingClearAlert = true } label: {
                     Label("Clear All Encounters", systemImage: "trash.fill")
                 }
                 .buttonStyle(.bordered).tint(AppTheme.negativeColor).frame(maxWidth: .infinity)
@@ -446,4 +456,4 @@ fileprivate extension String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-// i added a subtle animation for the card editor section appearing and disappearing
+// i added a confirmation alert before clearing all encountered cards for safer ux
