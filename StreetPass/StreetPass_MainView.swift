@@ -1,6 +1,3 @@
-// StreetPass_MainView.swift
-// Contains all primary SwiftUI views for the StreetPass application interface.
-
 import SwiftUI
 
 struct StreetPass_MainView: View {
@@ -9,14 +6,11 @@ struct StreetPass_MainView: View {
     var body: some View {
         NavigationView {
             List {
-                // Section: My Card Display & Edit Button
                 Section {
                     MyEncounterCardView(card: viewModel.myCurrentCard)
                     
                     Button(viewModel.isEditingMyCard ? "Manage My Card" : "Edit My Card") {
                         if viewModel.isEditingMyCard {
-                            // User is already in editor mode; this button's action could be refined
-                            // For now, it doesn't need to do anything new if editor is open
                         } else {
                             viewModel.prepareCardForEditing()
                         }
@@ -30,10 +24,9 @@ struct StreetPass_MainView: View {
                         .foregroundColor(AppTheme.primaryColor)
                 }
 
-                // Section: Card Editor (Conditional)
                 if viewModel.isEditingMyCard {
                     Section("Card Editor") {
-                        EncounterCardEditorView( // Defined further down in this file
+                        EncounterCardEditorView(
                             card: $viewModel.cardForEditor,
                             onOpenDrawingEditor: viewModel.openDrawingEditor,
                             onRemoveDrawing: viewModel.removeDrawingFromCard
@@ -49,18 +42,16 @@ struct StreetPass_MainView: View {
                     }
                 }
 
-                // Section: Controls & Status
                 Section("System Controls") {
-                    StreetPassControlsView(viewModel: viewModel) // Defined further down
+                    StreetPassControlsView(viewModel: viewModel)
                     
                     if let errorMsg = viewModel.lastErrorMessage {
-                        MessageView(message: errorMsg, type: .error) // Defined further down
+                        MessageView(message: errorMsg, type: .error)
                     } else if let infoMsg = viewModel.lastInfoMessage {
-                        MessageView(message: infoMsg, type: .info) // Defined further down
+                        MessageView(message: infoMsg, type: .info)
                     }
                 }
 
-                // Section: Received Encounter Cards
                 Section("Recent Encounters (\(viewModel.recentlyEncounteredCards.count))") {
                     if viewModel.recentlyEncounteredCards.isEmpty {
                         Text("No cards received yet. Activate StreetPass and explore!")
@@ -70,13 +61,12 @@ struct StreetPass_MainView: View {
                             .frame(maxWidth: .infinity)
                     } else {
                         ForEach(viewModel.recentlyEncounteredCards) { card in
-                            ReceivedEncounterCardRowView(card: card) // Defined further down
+                            ReceivedEncounterCardRowView(card: card)
                                 .padding(.vertical, 2)
                         }
                     }
                 }
 
-                // Section: Activity Log
                 Section("Activity Log (Last 50)") {
                     if viewModel.bleActivityLog.isEmpty {
                         Text("No activity logged yet.").foregroundColor(.secondary)
@@ -107,8 +97,6 @@ struct StreetPass_MainView: View {
         .accentColor(AppTheme.primaryColor)
         .navigationViewStyle(.stack)
         .sheet(isPresented: $viewModel.isDrawingSheetPresented) {
-            // DrawingEditorSheetView is defined in DrawingCanvasView.swift
-            // Ensure that DrawingCanvasView.swift is part of your target
             DrawingEditorSheetView(
                 isPresented: $viewModel.isDrawingSheetPresented,
                 cardDrawingData: $viewModel.cardForEditor.drawingData
@@ -118,7 +106,6 @@ struct StreetPass_MainView: View {
     }
 }
 
-// MARK: - StreetPassControlsView (Sub-view for MainView)
 struct StreetPassControlsView: View {
     @ObservedObject var viewModel: StreetPassViewModel
     var body: some View {
@@ -139,9 +126,9 @@ struct StreetPassControlsView: View {
             }
             
             HStack {
-                StatusIndicatorView(label: "Bluetooth", isOn: viewModel.isBluetoothOn); Spacer() // Defined below
-                StatusIndicatorView(label: "Scanning", isOn: viewModel.isScanningActive); Spacer() // Defined below
-                StatusIndicatorView(label: "Advertising", isOn: viewModel.isAdvertisingActive) // Defined below
+                StatusIndicatorView(label: "Bluetooth", isOn: viewModel.isBluetoothOn); Spacer()
+                StatusIndicatorView(label: "Scanning", isOn: viewModel.isScanningActive); Spacer()
+                StatusIndicatorView(label: "Advertising", isOn: viewModel.isAdvertisingActive)
             }
             .font(.footnote).padding(.top, 5)
         }
@@ -149,7 +136,6 @@ struct StreetPassControlsView: View {
     }
 }
 
-// MARK: - StatusIndicatorView (Sub-view for MainView)
 struct StatusIndicatorView: View {
     let label: String
     let isOn: Bool
@@ -162,7 +148,6 @@ struct StatusIndicatorView: View {
     }
 }
 
-// MARK: - MessageView (Sub-view for MainView)
 struct MessageView: View {
     let message: String
     enum MessageType { case info, error, warning }
@@ -182,10 +167,9 @@ struct MessageView: View {
     }
 }
 
-// MARK: - MyEncounterCardView (Card Display View)
 struct MyEncounterCardView: View {
     let card: EncounterCard
-    private let drawingDisplayMaxHeight: CGFloat = 150 // Or your preferred height
+    private let drawingDisplayMaxHeight: CGFloat = 150
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let drawingUiImage = card.drawingImage {
@@ -217,9 +201,8 @@ struct MyEncounterCardView: View {
                     Text("\"\(card.statusMessage)\"").font(.footnote).italic().foregroundColor(.secondary).lineLimit(3)
                 }
             }
-            // Using the file-local `trimming` extension on String
-            if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty { FlairDisplayRow(title: t1, value: v1) } // FlairDisplayRow defined below
-            if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty { FlairDisplayRow(title: t2, value: v2) } // FlairDisplayRow defined below
+            if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty { FlairDisplayRow(title: t1, value: v1) }
+            if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty { FlairDisplayRow(title: t2, value: v2) }
             Divider().padding(.vertical, 2)
             HStack { Text("ID: \(card.userID.prefix(8))..."); Spacer(); Text("Schema v\(card.cardSchemaVersion)") }
             .font(.caption2).foregroundColor(.gray)
@@ -229,12 +212,10 @@ struct MyEncounterCardView: View {
     }
 }
 
-// MARK: - FlairDisplayRow (Card Display View)
 struct FlairDisplayRow: View {
     let title: String?
     let value: String?
     var body: some View {
-        // Using the file-local `trimming` extension on String
         if let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty,
            let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
             HStack(alignment: .top) {
@@ -247,7 +228,6 @@ struct FlairDisplayRow: View {
     }
 }
 
-// MARK: - ReceivedEncounterCardRowView (Card Display View)
 struct ReceivedEncounterCardRowView: View {
     let card: EncounterCard
     private let drawingThumbnailSize: CGFloat = 50
@@ -264,13 +244,15 @@ struct ReceivedEncounterCardRowView: View {
                     .frame(width: drawingThumbnailSize, height: drawingThumbnailSize)
                     .foregroundColor(userColor).background(userColor.opacity(0.2)).clipShape(Circle())
             }
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(card.displayName).font(.headline).fontWeight(.semibold)
                 Text(card.statusMessage).font(.caption).foregroundColor(.secondary).lineLimit(2)
-                // Using the file-local `trimming` extension on String
                 if let t = card.flairField1Title, let v = card.flairField1Value, !t.trimming.isEmpty || !v.trimming.isEmpty {
                      Text("\(t.isEmpty ? "" : t + ": ")\(v)").font(.caption2).foregroundColor(userColor.opacity(0.9)).lineLimit(1)
                 }
+                Text("Card updated: \(card.lastUpdated, style: .relative) ago")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
             }
             Spacer()
         }
@@ -278,13 +260,11 @@ struct ReceivedEncounterCardRowView: View {
     }
 }
 
-// MARK: - EncounterCardEditorView (Card Editor)
 struct EncounterCardEditorView: View {
     @Binding var card: EncounterCard
     var onOpenDrawingEditor: () -> Void
     var onRemoveDrawing: () -> Void
     
-    // Ensure this list matches your original full list of avatar options
     private let avatarOptions: [String] = [
         "person.fill", "person.crop.circle.fill", "face.smiling.fill", "star.fill",
         "heart.fill", "gamecontroller.fill", "music.note", "book.fill",
@@ -331,7 +311,6 @@ struct EncounterCardEditorView: View {
             }
             Text("Avatar shown if no drawing exists or in compact views.").font(.caption2).foregroundColor(.gray)
             
-            // FlairEditorSection is defined as a nested struct below
             FlairEditorSection(
                 titleBinding1: titleBinding(for: \.flairField1Title),
                 valueBinding1: valueBinding(for: \.flairField1Value),
@@ -342,7 +321,6 @@ struct EncounterCardEditorView: View {
         .textFieldStyle(.roundedBorder)
     }
 
-    // Nested struct for Flair Editor
     struct FlairEditorSection: View {
         @Binding var titleBinding1: String
         @Binding var valueBinding1: String
@@ -365,7 +343,6 @@ struct EncounterCardEditorView: View {
         }
     }
 
-    // Helper bindings, defined ONCE within EncounterCardEditorView
     private func titleBinding(for keyPath: WritableKeyPath<EncounterCard, String?>) -> Binding<String> {
         Binding<String>(
             get: { card[keyPath: keyPath] ?? "" },
@@ -378,10 +355,9 @@ struct EncounterCardEditorView: View {
             set: { card[keyPath: keyPath] = $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         )
     }
-} // End of EncounterCardEditorView
+}
 
 
-// MARK: - Previews
 struct StreetPass_MainView_Previews: PreviewProvider {
     static var previews: some View {
         let previewVM = StreetPassViewModel(userID: "previewUser123")
@@ -393,7 +369,7 @@ struct StreetPass_MainView_Previews: PreviewProvider {
             UIColor.systemBlue.setFill(); ctx.fill(CGRect(x: 0, y: 0, width: 200, height: 150))
             ("Sample Drawing" as NSString).draw(with: CGRect(x: 20, y: 60, width: 160, height: 30), options: .usesLineFragmentOrigin, attributes: attrs, context: nil)
         }
-        previewVM.bleManager.localUserCard.displayName = "My Drawn Card Preview" // Changed for clarity
+        previewVM.bleManager.localUserCard.displayName = "My Drawn Card"
         previewVM.bleManager.localUserCard.statusMessage = "This is my card with a drawing!"
         previewVM.bleManager.localUserCard.drawingData = sampleDrawing.pngData()
         previewVM.bleManager.localUserCard.flairField1Title = "Mood"; previewVM.bleManager.localUserCard.flairField1Value = "Creative!"
@@ -402,22 +378,26 @@ struct StreetPass_MainView_Previews: PreviewProvider {
         sampleCard1.flairField1Title = "Tool"; sampleCard1.flairField1Value = "iPad & Pencil"
         let anotherDrawing = renderer.image { ctx in UIColor.systemGreen.setFill(); ctx.fill(CGRect(x:0,y:0,width:200,height:150)); ("Hi!" as NSString).draw(at: CGPoint(x:80, y:60), withAttributes: attrs)}
         sampleCard1.drawingData = anotherDrawing.jpegData(compressionQuality: 0.7)
+        sampleCard1.lastUpdated = Calendar.current.date(byAdding: .minute, value: -5, to: Date())!
+
 
         var sampleCard2 = EncounterCard(userID: "userB", displayName: "Text Tom", statusMessage: "Old school, text only!", avatarSymbolName: "text.bubble.fill")
-        previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2]
-        previewVM.bleManager.isBluetoothPoweredOn = true; previewVM.bleManager.isScanning = true
+        sampleCard2.lastUpdated = Calendar.current.date(byAdding: .hour, value: -2, to: Date())!
         
-        // To preview the editor already open:
-        // previewVM.isEditingMyCard = true
-        // previewVM.prepareCardForEditing() // This makes sure cardForEditor is current for the preview
+        var sampleCard3 = EncounterCard(userID: "userC", displayName: "Newbie Nick", statusMessage: "Just joined!", avatarSymbolName: "figure.wave")
+        sampleCard3.lastUpdated = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+
+
+        previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2, sampleCard3]
+        previewVM.bleManager.isBluetoothPoweredOn = true; previewVM.bleManager.isScanning = true
         
         return StreetPass_MainView(viewModel: previewVM)
     }
 }
 
-// File-local String extension helper for trimming, used by views in this file
 fileprivate extension String {
     var trimming: String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+// i displayed the 'last updated' time on received encounter cards for better contexts
