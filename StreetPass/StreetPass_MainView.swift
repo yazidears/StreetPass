@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers // Required for UIPasteboard
 
 struct StreetPass_MainView: View {
     @StateObject var viewModel: StreetPassViewModel
@@ -6,6 +7,40 @@ struct StreetPass_MainView: View {
 
     @State private var searchText: String = ""
     @State private var sortOption: SortOption = .lastUpdatedDescending
+    @State private var showingFavoritesOnly: Bool = false
+
+    @AppStorage("favorite_user_ids_json_v1") private var favoriteUserIDsJSON: String = "[]"
+
+    private var favoriteUserIDs: Set<String> {
+        get {
+            guard let data = favoriteUserIDsJSON.data(using: .utf8),
+                  let ids = try? JSONDecoder().decode(Set<String>.self, from: data) else {
+                return []
+            }
+            return ids
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let jsonString = String(data: data, encoding: .utf8) else {
+                favoriteUserIDsJSON = "[]"
+                return
+            }
+            favoriteUserIDsJSON = jsonString
+        }
+    }
+
+    private func isFavorite(userID: String) -> Bool {
+        favoriteUserIDs.contains(userID)
+    }
+
+    private func toggleFavorite(userID: String) {
+        if favoriteUserIDs.contains(userID) {
+            favoriteUserIDs.remove(userID)
+        } else {
+            favoriteUserIDs.insert(userID)
+        }
+    }
+
 
     enum SortOption: String, CaseIterable, Identifiable {
         case lastUpdatedDescending = "Date (Newest First)"
@@ -17,7 +52,13 @@ struct StreetPass_MainView: View {
     }
 
     private var filteredAndSortedCards: [EncounterCard] {
-        let filtered = viewModel.recentlyEncounteredCards.filter { card in
+        var cardsToProcess = viewModel.recentlyEncounteredCards
+
+        if showingFavoritesOnly {
+            cardsToProcess = cardsToProcess.filter { favoriteUserIDs.contains($0.userID) }
+        }
+
+        let filteredBySearch = cardsToProcess.filter { card in
             if searchText.isEmpty {
                 return true
             }
@@ -32,13 +73,13 @@ struct StreetPass_MainView: View {
 
         switch sortOption {
         case .lastUpdatedDescending:
-            return filtered.sorted { $0.lastUpdated > $1.lastUpdated }
+            return filteredBySearch.sorted { $0.lastUpdated > $1.lastUpdated }
         case .lastUpdatedAscending:
-            return filtered.sorted { $0.lastUpdated < $1.lastUpdated }
+            return filteredBySearch.sorted { $0.lastUpdated < $1.lastUpdated }
         case .nameAscending:
-            return filtered.sorted { $0.displayName.lowercased() < $1.displayName.lowercased() }
+            return filteredBySearch.sorted { $0.displayName.lowercased() < $1.displayName.lowercased() }
         case .nameDescending:
-            return filtered.sorted { $0.displayName.lowercased() > $1.displayName.lowercased() }
+            return filteredBySearch.sorted { $0.displayName.lowercased() > $1.displayName.lowercased() }
         }
     }
 
@@ -55,11 +96,24 @@ struct StreetPass_MainView: View {
                             Text(option.rawValue).tag(option)
                         }
                     }
+                    Toggle(isOn: $showingFavoritesOnly) {
+                        Label("Favorites Only", systemImage: showingFavoritesOnly ? "star.fill" : "star")
+                    }
                 } label: {
                     Image(systemName: "arrow.up.arrow.down.circle.fill")
                         .font(.title3)
                         .foregroundColor(AppTheme.primaryColor)
+                        .overlay(
+                            showingFavoritesOnly ?
+                            Image(systemName: "star.fill")
+                                .font(.caption)
+                                .foregroundColor(.yellow)
+                                .offset(x: 10, y: -10)
+                                .transition(.scale.combined(with: .opacity))
+                            : nil
+                        )
                 }
+                .animation(.default, value: showingFavoritesOnly)
             }
         }
     }
@@ -122,6 +176,7 @@ struct StreetPass_MainView: View {
                             .padding(.vertical, 8)
                             .textFieldStyle(.roundedBorder)
                             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                            .submitLabel(.search)
                     }
 
                     if viewModel.recentlyEncounteredCards.isEmpty {
@@ -132,13 +187,13 @@ struct StreetPass_MainView: View {
                             .frame(maxWidth: .infinity)
                     } else if filteredAndSortedCards.isEmpty {
                          VStack(alignment: .center, spacing: 8) {
-                             Image(systemName: "magnifyingglass.circle")
+                             Image(systemName: showingFavoritesOnly ? "star.slash.fill" : "magnifyingglass.circle")
                                  .font(.system(size: 40))
                                  .foregroundColor(.secondary.opacity(0.5))
-                            Text("No Encounters Match")
+                            Text(showingFavoritesOnly ? "No Favorites Yet" : "No Encounters Match")
                                 .font(.headline)
                                 .foregroundColor(.secondary)
-                            Text(searchText.isEmpty ? "Try a different sort option." : "Try adjusting your search or sort criteria.")
+                            Text(showingFavoritesOnly ? "Mark some encounters as favorite!" : (searchText.isEmpty ? "Try a different sort option." : "Try adjusting your search or sort criteria."))
                                 .font(.caption)
                                 .foregroundColor(.secondary.opacity(0.8))
                                 .multilineTextAlignment(.center)
@@ -147,15 +202,28 @@ struct StreetPass_MainView: View {
                         .frame(maxWidth: .infinity)
                     } else {
                         ForEach(filteredAndSortedCards) { card in
-                            NavigationLink(destination: ReceivedCardDetailView(card: card)) {
-                                ReceivedEncounterCardRowView(card: card)
+                            NavigationLink(destination: ReceivedCardDetailView(card: card, isFavorite: isFavorite(userID: card.userID), toggleFavoriteAction: { toggleFavorite(userID: card.userID) })) {
+                                ReceivedEncounterCardRowView(card: card, isFavorite: isFavorite(userID: card.userID))
+                                    .contextMenu {
+                                        Button {
+                                            toggleFavorite(userID: card.userID)
+                                        } label: {
+                                            Label(isFavorite(userID: card.userID) ? "Unfavorite" : "Favorite", systemImage: isFavorite(userID: card.userID) ? "star.slash.fill" : "star.fill")
+                                        }
+                                        Button {
+                                            UIPasteboard.general.setValue(card.userID, forPasteboardType: UTType.plainText.identifier)
+                                            viewModel.showInfoMessageForCopyToClipboard("User ID copied!")
+                                        } label: {
+                                            Label("Copy User ID", systemImage: "doc.on.doc")
+                                        }
+                                    }
                             }
-                             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 16))
+                            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 16))
                         }
-                        if !searchText.isEmpty || sortOption != .lastUpdatedDescending {
+                         if !searchText.isEmpty || sortOption != .lastUpdatedDescending || showingFavoritesOnly {
                             HStack {
                                 Spacer()
-                                Text("Showing \(filteredAndSortedCards.count) of \(viewModel.recentlyEncounteredCards.count) encounters")
+                                Text("Showing \(filteredAndSortedCards.count) of \(showingFavoritesOnly ? favoriteUserIDs.count : viewModel.recentlyEncounteredCards.count) \(showingFavoritesOnly ? "favorite " : "")encounters")
                                     .font(.caption2)
                                     .foregroundColor(.gray)
                                 Spacer()
@@ -183,6 +251,7 @@ struct StreetPass_MainView: View {
             }
             .animation(.smooth(duration: 0.35), value: viewModel.isEditingMyCard)
             .animation(.default, value: filteredAndSortedCards)
+            .animation(.default, value: showingFavoritesOnly)
             .navigationTitle("StreetPass")
             .navigationBarTitleDisplayMode(.inline)
             .listStyle(.insetGrouped)
@@ -269,11 +338,16 @@ struct CardDetailSection<Content: View>: View {
 
 struct ReceivedCardDetailView: View {
     let card: EncounterCard
+    @State var isFavorite: Bool // Pass initial state
+    let toggleFavoriteAction: () -> Void // Action to call
+
     private let drawingDisplayMaxHeight: CGFloat = 250
     private let userColor: Color
 
-    init(card: EncounterCard) {
+    init(card: EncounterCard, isFavorite: Bool, toggleFavoriteAction: @escaping () -> Void) {
         self.card = card
+        self._isFavorite = State(initialValue: isFavorite)
+        self.toggleFavoriteAction = toggleFavoriteAction
         self.userColor = AppTheme.userSpecificColor(for: card.userID)
     }
 
@@ -384,6 +458,15 @@ struct ReceivedCardDetailView: View {
                     Image(systemName: card.avatarSymbolName).foregroundColor(userColor)
                     Text(card.displayName).font(.headline)
                 }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    toggleFavoriteAction()
+                    isFavorite.toggle() // Update local state for immediate UI feedback
+                } label: {
+                    Label(isFavorite ? "Unfavorite" : "Favorite", systemImage: isFavorite ? "star.fill" : "star")
+                }
+                .tint(isFavorite ? .yellow : AppTheme.primaryColor)
             }
         }
     }
@@ -569,6 +652,7 @@ struct FlairDisplayRow: View {
 
 struct ReceivedEncounterCardRowView: View {
     let card: EncounterCard
+    let isFavorite: Bool
     private let drawingThumbnailSize: CGFloat = 55
     var body: some View {
         let userColor = AppTheme.userSpecificColor(for: card.userID)
@@ -592,8 +676,16 @@ struct ReceivedEncounterCardRowView: View {
             .padding(.leading, 4)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(card.displayName).font(.headline).fontWeight(.semibold)
-                    .lineLimit(1)
+                HStack {
+                    if isFavorite {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                            .font(.caption)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    Text(card.displayName).font(.headline).fontWeight(.semibold)
+                        .lineLimit(1)
+                }
                 Text(card.statusMessage).font(.caption).foregroundColor(.secondary).lineLimit(1).truncationMode(.tail)
 
                 HStack(spacing: 4) {
@@ -603,6 +695,7 @@ struct ReceivedEncounterCardRowView: View {
                     .foregroundColor(.gray)
                 }
             }
+            .animation(.default, value: isFavorite)
             Spacer()
             Image(systemName: "chevron.right").foregroundColor(.secondary.opacity(0.5))
         }
@@ -784,13 +877,18 @@ struct StreetPass_MainView_Previews: PreviewProvider {
 
         previewVM.prepareCardForEditing()
 
+        let mainViewWithFavorites = StreetPass_MainView(viewModel: previewVM)
+        mainViewWithFavorites.favoriteUserIDs = ["userA", "userC"] // Pre-favorite some for preview
+
+
         return Group {
-            StreetPass_MainView(viewModel: previewVM)
-                .previewDisplayName("Main View (Filtering/Sorting)")
+            mainViewWithFavorites
+                .previewDisplayName("Main View (Favorites System)")
 
             NavigationView {
-                ReceivedCardDetailView(card: sampleCard1)
-            }.previewDisplayName("Received Card Detail (Anna)")
+                // Ensure preview works for detail view by manually passing favorite state
+                ReceivedCardDetailView(card: sampleCard1, isFavorite: true, toggleFavoriteAction: { print("Preview Toggle Fav for Anna") } )
+            }.previewDisplayName("Detail View (Anna - Favorited)")
 
         }
     }
@@ -801,4 +899,4 @@ fileprivate extension String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-// i added filtering and sorting capabilities to the recent encounters list for improved usability
+//i added a favorites system allowing users to mark/unmark cards, filter by favorites, and manage them via context menus and detail view, with persistence using @appstorage
