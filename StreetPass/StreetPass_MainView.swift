@@ -3,6 +3,14 @@ import SwiftUI
 struct StreetPass_MainView: View {
     @StateObject var viewModel: StreetPassViewModel
 
+    private func formattedEncountersSectionHeader() -> String {
+        if viewModel.recentlyEncounteredCards.isEmpty {
+            return "Recent Encounters"
+        } else {
+            return "Recent Encounters (\(viewModel.recentlyEncounteredCards.count))"
+        }
+    }
+
     var body: some View {
         NavigationView {
             List {
@@ -52,7 +60,7 @@ struct StreetPass_MainView: View {
                     }
                 }
 
-                Section("Recent Encounters (\(viewModel.recentlyEncounteredCards.count))") {
+                Section(formattedEncountersSectionHeader()) {
                     if viewModel.recentlyEncounteredCards.isEmpty {
                         Text("No cards received yet. Activate StreetPass and explore!")
                             .foregroundColor(.secondary)
@@ -170,6 +178,15 @@ struct MessageView: View {
 struct MyEncounterCardView: View {
     let card: EncounterCard
     private let drawingDisplayMaxHeight: CGFloat = 150
+    
+    private func shouldShowFlairSection() -> Bool {
+        let f1t = card.flairField1Title?.trimming ?? ""
+        let f1v = card.flairField1Value?.trimming ?? ""
+        let f2t = card.flairField2Title?.trimming ?? ""
+        let f2v = card.flairField2Value?.trimming ?? ""
+        return !f1t.isEmpty || !f1v.isEmpty || !f2t.isEmpty || !f2v.isEmpty
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let drawingUiImage = card.drawingImage {
@@ -201,8 +218,12 @@ struct MyEncounterCardView: View {
                     Text("\"\(card.statusMessage)\"").font(.footnote).italic().foregroundColor(.secondary).lineLimit(3)
                 }
             }
-            if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty { FlairDisplayRow(title: t1, value: v1) }
-            if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty { FlairDisplayRow(title: t2, value: v2) }
+            
+            if shouldShowFlairSection() {
+                if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty { FlairDisplayRow(title: t1, value: v1) }
+                if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty { FlairDisplayRow(title: t2, value: v2) }
+            }
+            
             Divider().padding(.vertical, 2)
             HStack { Text("ID: \(card.userID.prefix(8))..."); Spacer(); Text("Schema v\(card.cardSchemaVersion)") }
             .font(.caption2).foregroundColor(.gray)
@@ -274,6 +295,14 @@ struct EncounterCardEditorView: View {
         "cloud.sleet.fill", "message.fill", "briefcase.fill", "studentdesk"
     ]
 
+    private func isDisplayNameValid() -> Bool {
+        return !card.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func characterCountColor(for count: Int, max: Int) -> Color {
+        return count > max ? AppTheme.negativeColor : .gray
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading) {
@@ -298,11 +327,22 @@ struct EncounterCardEditorView: View {
             Divider()
             Text("Text Details").font(.callout).fontWeight(.medium)
             TextField("Display Name", text: $card.displayName, prompt: Text("Your Public Name"))
+                .overlay(
+                    HStack {
+                        Spacer()
+                        if !isDisplayNameValid() {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(AppTheme.negativeColor)
+                                .padding(.trailing, 8)
+                        }
+                    }
+                )
+
             VStack(alignment: .leading, spacing: 4) {
                 Text("Status Message (max 150 chars)").font(.caption).foregroundColor(.gray)
                 TextEditor(text: $card.statusMessage).frame(height: 70).clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                Text("\(card.statusMessage.count) / 150").font(.caption2).foregroundColor(card.statusMessage.count > 150 ? AppTheme.negativeColor : .gray)
+                Text("\(card.statusMessage.count) / 150").font(.caption2).foregroundColor(characterCountColor(for: card.statusMessage.count, max: 150))
             }
             Picker("Avatar Icon (Fallback)", selection: $card.avatarSymbolName) {
                 ForEach(avatarOptions, id: \.self) { symbol in
@@ -373,6 +413,8 @@ struct StreetPass_MainView_Previews: PreviewProvider {
         previewVM.bleManager.localUserCard.statusMessage = "This is my card with a drawing!"
         previewVM.bleManager.localUserCard.drawingData = sampleDrawing.pngData()
         previewVM.bleManager.localUserCard.flairField1Title = "Mood"; previewVM.bleManager.localUserCard.flairField1Value = "Creative!"
+        previewVM.bleManager.localUserCard.flairField2Title = "Project"; previewVM.bleManager.localUserCard.flairField2Value = "StreetPass App"
+
 
         var sampleCard1 = EncounterCard(userID: "userA", displayName: "Artist Anna", statusMessage: "Drawing all day", avatarSymbolName: "paintbrush.fill")
         sampleCard1.flairField1Title = "Tool"; sampleCard1.flairField1Value = "iPad & Pencil"
@@ -391,6 +433,10 @@ struct StreetPass_MainView_Previews: PreviewProvider {
         previewVM.bleManager.receivedCards = [sampleCard1, sampleCard2, sampleCard3]
         previewVM.bleManager.isBluetoothPoweredOn = true; previewVM.bleManager.isScanning = true
         
+        previewVM.prepareCardForEditing() 
+        // previewVM.cardForEditor.displayName = "" 
+
+
         return StreetPass_MainView(viewModel: previewVM)
     }
 }
@@ -400,4 +446,4 @@ fileprivate extension String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-// i displayed the 'last updated' time on received encounter cards for better contexts
+// i added four helper methods: formattedEncountersSectionHeader in streetpass_mainview, shouldShowFlairSection in myencountercardview, and isDisplayNameValid & characterCountColor in encountercardeditorview for improved code organization and minor ui hints
