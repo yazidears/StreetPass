@@ -14,9 +14,11 @@ class DrawingView: UIView {
     private var currentColor: UIColor = .black
     private var currentLineWidth: CGFloat = 5.0
 
-    // Store paths to be undone
     private var redoablePaths: [DrawablePath] = []
 
+    var canUndo: Bool { !paths.isEmpty }
+    var canRedo: Bool { !redoablePaths.isEmpty }
+    
     // Public configuration
     func setDrawingColor(_ color: UIColor) {
         self.currentColor = color
@@ -31,6 +33,7 @@ class DrawingView: UIView {
         redoablePaths.removeAll()
         currentPath = nil
         setNeedsDisplay()
+        updateUndoRedoStates()
     }
 
     func undo() {
@@ -38,6 +41,7 @@ class DrawingView: UIView {
         let lastPath = paths.removeLast()
         redoablePaths.append(lastPath)
         setNeedsDisplay()
+        updateUndoRedoStates()
     }
 
     func redo() {
@@ -45,27 +49,30 @@ class DrawingView: UIView {
         let pathToRedo = redoablePaths.removeLast()
         paths.append(pathToRedo)
         setNeedsDisplay()
+        updateUndoRedoStates()
     }
     
-    var canUndo: Bool { !paths.isEmpty }
-    var canRedo: Bool { !redoablePaths.isEmpty }
+    
+    func updateUndoRedoStates() {
+        // This function primarily exists to trigger KVO or some notification if this
+        // class were an ObservableObject used directly. For UIViewRepresentable,
+        // the bindings in the wrapper + .onChange in SwiftUI view handle this.
+    }
 
-
-    // Get the current drawing as a UIImage
-    // Added parameters for output size and background color
     func getDrawingImage(targetSize: CGSize? = nil, backgroundColor: UIColor = .white) -> UIImage {
         let actualSize = targetSize ?? self.bounds.size
-        if actualSize == .zero { return UIImage() } // Avoid crash if size is zero
+        guard actualSize != .zero, actualSize.width > 0, actualSize.height > 0 else {
+            print("DrawingView Error: Attempted to get image with zero or negative size: \(actualSize). Returning empty UIImage.")
+            return UIImage()
+        }
 
         let renderer = UIGraphicsImageRenderer(size: actualSize)
         return renderer.image { context in
-            // Fill background
             backgroundColor.setFill()
             context.fill(CGRect(origin: .zero, size: actualSize))
 
-            // Scale and draw paths
             let originalBounds = self.bounds
-            if originalBounds.size != .zero && actualSize != originalBounds.size {
+            if originalBounds.size != .zero && actualSize != originalBounds.size && originalBounds.width > 0 && originalBounds.height > 0 {
                 let scaleX = actualSize.width / originalBounds.width
                 let scaleY = actualSize.height / originalBounds.height
                 context.cgContext.scaleBy(x: scaleX, y: scaleY)
@@ -79,28 +86,29 @@ class DrawingView: UIView {
         }
     }
     
-    
-    func setDrawing(from paths: [DrawablePath]) {
-        self.paths = paths
+    func setDrawing(from newPaths: [DrawablePath]) { // Renamed parameter for clarity
+        self.paths = newPaths
         self.redoablePaths.removeAll()
         setNeedsDisplay()
+        updateUndoRedoStates()
     }
-
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        self.backgroundColor = .white // Default canvas background
+        self.backgroundColor = .clear // Let parent control background, or canvas itself. Let's try clear for more flexibility.
         setupView()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        self.backgroundColor = .white
+        self.backgroundColor = .clear
         setupView()
     }
 
     private func setupView() {
         isMultipleTouchEnabled = false
+        // Set contentMode to redraw on bounds change, though manual setNeedsDisplay is often used.
+        // self.contentMode = .redraw
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -112,6 +120,7 @@ class DrawingView: UIView {
         currentPath?.lineJoinStyle = .round
         currentPath?.move(to: point)
         redoablePaths.removeAll() // Clear redo stack on new stroke
+        // updateUndoRedoStates() // Not strictly needed here if not observing directly
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -126,15 +135,20 @@ class DrawingView: UIView {
         paths.append(DrawablePath(path: path, color: currentColor, lineWidth: currentLineWidth))
         currentPath = nil
         setNeedsDisplay()
+        updateUndoRedoStates()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         currentPath = nil
         setNeedsDisplay()
+        // updateUndoRedoStates() // If a stroke was in progress
     }
 
     override func draw(_ rect: CGRect) {
         super.draw(rect)
+
+
+
 
         for drawablePath in paths {
             drawablePath.color.setStroke()
