@@ -6,8 +6,9 @@ import Combine
 import UIKit
 
 class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
-    
-    @ObservedObject var bleManager: StreetPassBLEManager
+
+    @Published private(set) var bleManager: StreetPassBLEManager
+    private var bleManagerCancellable: AnyCancellable?
     
     @Published var isEditingMyCard: Bool = false // // old ui state, might need to rethink for new ui
     @Published var cardForEditor: EncounterCard // // used by drawing editor and old card editor
@@ -32,6 +33,7 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
         self.bleManager = initialBLEManager
         self.cardForEditor = EncounterCard(userID: userID) // // default card for editor
         self.bleManager.delegate = self
+        bindBLEManager()
         self.bleManager.loadLocalUserCardFromPersistence()
         self.cardForEditor = self.bleManager.localUserCard // // sync editor card with loaded one
         self.greetingName = self.bleManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
@@ -41,6 +43,12 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
 
     private func logViewModel(_ message: String) {
         bleManager.log("ViewModel: \(message)")
+    }
+
+    private func bindBLEManager() {
+        bleManagerCancellable = bleManager.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
     }
 
     // MARK: - UI Actions (potentially for new UI or old editor logic if kept)
@@ -171,10 +179,12 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
         defaults.removeObject(forKey: "streetPass_LocalUserCard_v2")
         defaults.removeObject(forKey: "streetPass_ReceivedCards_v2")
 
-        let newID = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        let newID = UUID().uuidString
+        defaults.set(newID, forKey: "streetPass_PersistentUserID_v1")
         let freshManager = StreetPassBLEManager(userID: newID)
         freshManager.delegate = self
         self.bleManager = freshManager
+        bindBLEManager()
 
         self.cardForEditor = freshManager.localUserCard
         self.greetingName = freshManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
@@ -183,6 +193,7 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
         self.lastInfoMessage = nil
 
         bleManager.start()
+        objectWillChange.send()
     }
 
 
