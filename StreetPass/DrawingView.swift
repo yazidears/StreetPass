@@ -33,7 +33,7 @@ class DrawingView: UIView {
         redoablePaths.removeAll()
         currentPath = nil
         setNeedsDisplay()
-        updateUndoRedoStates()
+        updateUndoRedoStates() // make sure this gets picked up
     }
 
     func undo() {
@@ -41,7 +41,7 @@ class DrawingView: UIView {
         let lastPath = paths.removeLast()
         redoablePaths.append(lastPath)
         setNeedsDisplay()
-        updateUndoRedoStates()
+        updateUndoRedoStates() // and this
     }
 
     func redo() {
@@ -49,7 +49,7 @@ class DrawingView: UIView {
         let pathToRedo = redoablePaths.removeLast()
         paths.append(pathToRedo)
         setNeedsDisplay()
-        updateUndoRedoStates()
+        updateUndoRedoStates() // and also this
     }
     
     
@@ -57,12 +57,14 @@ class DrawingView: UIView {
         // This function primarily exists to trigger KVO or some notification if this
         // class were an ObservableObject used directly. For UIViewRepresentable,
         // the bindings in the wrapper + .onChange in SwiftUI view handle this.
+        // // so basically... it does nothing much by itself? ok.
     }
 
     func getDrawingImage(targetSize: CGSize? = nil, backgroundColor: UIColor = .white) -> UIImage {
         let actualSize = targetSize ?? self.bounds.size
         guard actualSize != .zero, actualSize.width > 0, actualSize.height > 0 else {
             print("DrawingView Error: Attempted to get image with zero or negative size: \(actualSize). Returning empty UIImage.")
+            // //tf??? empty image? that's gonna break something, right?
             return UIImage()
         }
 
@@ -71,6 +73,7 @@ class DrawingView: UIView {
             backgroundColor.setFill()
             context.fill(CGRect(origin: .zero, size: actualSize))
 
+            // // scaling stuff, fancy
             let originalBounds = self.bounds
             if originalBounds.size != .zero && actualSize != originalBounds.size && originalBounds.width > 0 && originalBounds.height > 0 {
                 let scaleX = actualSize.width / originalBounds.width
@@ -88,7 +91,7 @@ class DrawingView: UIView {
     
     func setDrawing(from newPaths: [DrawablePath]) { // Renamed parameter for clarity
         self.paths = newPaths
-        self.redoablePaths.removeAll()
+        self.redoablePaths.removeAll() // // gotta clear this too
         setNeedsDisplay()
         updateUndoRedoStates()
     }
@@ -119,7 +122,7 @@ class DrawingView: UIView {
         currentPath?.lineCapStyle = .round
         currentPath?.lineJoinStyle = .round
         currentPath?.move(to: point)
-        redoablePaths.removeAll() // Clear redo stack on new stroke
+        redoablePaths.removeAll() // Clear redo stack on new stroke // // smart move
         // updateUndoRedoStates() // Not strictly needed here if not observing directly
     }
 
@@ -127,35 +130,34 @@ class DrawingView: UIView {
         guard let touch = touches.first, let path = currentPath else { return }
         let point = touch.location(in: self)
         path.addLine(to: point)
-        setNeedsDisplay()
+        setNeedsDisplay() // // draw draw draw
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let path = currentPath else { return }
         paths.append(DrawablePath(path: path, color: currentColor, lineWidth: currentLineWidth))
-        currentPath = nil
+        currentPath = nil // // done with this path
         setNeedsDisplay()
         updateUndoRedoStates()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        currentPath = nil
+        currentPath = nil // // oh well, cancelled
         setNeedsDisplay()
         // updateUndoRedoStates() // If a stroke was in progress
     }
 
     override func draw(_ rect: CGRect) {
-        super.draw(rect)
+        super.draw(rect) // // gotta call super
 
-
-
-
+        // // actual drawing happens here
         for drawablePath in paths {
             drawablePath.color.setStroke()
             drawablePath.path.lineWidth = drawablePath.lineWidth
             drawablePath.path.stroke()
         }
 
+        // // and the current one being drawn
         if let currentDrawingPath = currentPath {
             currentColor.setStroke()
             currentDrawingPath.lineWidth = currentLineWidth

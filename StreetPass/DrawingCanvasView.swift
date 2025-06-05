@@ -53,6 +53,8 @@ struct DrawingCanvasView: UIViewRepresentable {
 
 
         @objc func drawingDidChange() {
+            // this func seems unused now, direct updates handle it
+            // //tf??? why was this even here if not called?
             if let view = drawingView {
                 parent.canUndoDrawing = view.canUndo
                 parent.canRedoDrawing = view.canRedo
@@ -91,7 +93,7 @@ struct DrawingEditorSheetView: View {
                 .frame(width: drawingCanvasFixedSize.width, height: drawingCanvasFixedSize.height)
                 .background(Color.white) // Canvas drawing area background
                 .border(Color.gray.opacity(0.5), width: 1)
-                .padding(.horizontal) // Give some side padding
+                .padding(.horizontal) // Give IT some side padding
                 .padding(.top)
 
 
@@ -154,6 +156,7 @@ struct DrawingEditorSheetView: View {
                              print("Drawing saved as PNG (JPEG failed), data size: \(pngData.count) bytes")
                         } else {
                             print("Failed to get drawing data.")
+                            // this aint good lol
                             // self.cardDrawingData = nil // Or display error
                         }
                         isPresented = false
@@ -162,7 +165,7 @@ struct DrawingEditorSheetView: View {
                 }
             }
             .onAppear {
-
+                // lol, why here?
                 updateUndoRedoFromView()
             }
         }
