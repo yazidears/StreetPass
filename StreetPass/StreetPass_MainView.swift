@@ -22,7 +22,7 @@ struct ShareSheetView: UIViewControllerRepresentable {
 
 // MARK: - Main View
 struct StreetPass_MainView: View {
-    @StateObject private var viewModel: StreetPassViewModel
+    @EnvironmentObject private var viewModel: StreetPassViewModel
     @State private var searchText: String = ""
     private let isForSwiftUIPreview: Bool
 
@@ -66,8 +66,6 @@ struct StreetPass_MainView: View {
 
     init(isForSwiftUIPreview: Bool = false) {
         self.isForSwiftUIPreview = isForSwiftUIPreview
-        let userID = isForSwiftUIPreview ? "previewUser" : "local_user"
-        _viewModel = StateObject(wrappedValue: StreetPassViewModel(userID: userID))
     }
 
     var body: some View {
