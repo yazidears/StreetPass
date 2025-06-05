@@ -88,13 +88,13 @@ fileprivate struct GlassBackgroundModifier: ViewModifier {
         
         switch customShadow {
         case .none:
-            return AnyView(base)
+            return base.shadow(color: .clear, radius: 0, x: 0, y: 0)
         case .soft:
-            return AnyView(base.shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2))
+            return base.shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
         case .medium:
-            return AnyView(base.shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4))
+            return base.shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
         case .custom(let color, let radius, let x, let y):
-            return AnyView(base.shadow(color: color, radius: radius, x: x, y: y))
+            return base.shadow(color: color, radius: radius, x: x, y: y)
         }
     }
 }
@@ -397,7 +397,7 @@ struct StreetPass_MainView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
-                .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
                 .padding(.horizontal)
 
             } else if sortedCards.isEmpty && !searchText.isEmpty {
@@ -417,7 +417,7 @@ struct StreetPass_MainView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
-                .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
                 .padding(.horizontal)
             } else {
                 LazyVStack(spacing: 12) {
@@ -464,7 +464,7 @@ struct StreetPass_MainView: View {
                                     .foregroundColor(AppTheme.spTertiaryText)
                             }
                             .padding()
-                            .glassBackground(material: AppTheme.cardBackgroundColor, strokeColor: AppTheme.glassBorderSubtle, shadow: .soft)
+                            .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, strokeColor: AppTheme.glassBorderSubtle, shadow: .soft)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(PlainButtonStyle())
@@ -538,7 +538,7 @@ struct RecentCardsSwappedSectionView: View {
                     .foregroundColor(AppTheme.spSecondaryText)
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .glassBackground(material: AppTheme.cardBackgroundColor, cornerRadius: 10, shadow: .soft)
+                    .glassBackground(cornerRadius: 10, material: AppTheme.cardBackgroundColor, shadow: .soft)
                     .padding(.horizontal)
                     .opacity(sectionVisible ? 1 : 0)
                     .offset(y: sectionVisible ? 0 : 15)
@@ -700,7 +700,7 @@ struct StatusBoxView: View {
             Spacer()
         }
         .padding(12)
-        .glassBackground(material: AppTheme.cardBackgroundColor, strokeColor: mainColor.opacity(0.3), strokeWidth: 1, shadow: .custom(color: mainColor.opacity(0.1), radius: 4, x:0, y:2))
+        .glassBackground(cornerRadius: 12, material: AppTheme.cardBackgroundColor, strokeColor: mainColor.opacity(0.3), strokeWidth: 1, shadow: .custom(color: mainColor.opacity(0.1), radius: 4, x:0, y:2))
     }
 }
 
@@ -756,7 +756,8 @@ struct ReceivedCardDetailView: View {
                         .padding(.horizontal)
                 }
                 .frame(maxWidth: .infinity, minHeight: drawingDisplayMaxHeight * 0.6)
-                .glassBackground(material: userColor.opacity(0.05), strokeColor: userColor.opacity(0.15), strokeWidth: 1.5, shadow: .soft)
+                .background(userColor.opacity(0.1))
+                .glassBackground(cornerRadius: 15, material: AppTheme.glassMaterialUltraThin, strokeColor: userColor.opacity(0.15), strokeWidth: 1.5, shadow: .soft)
                 .padding()
             }
         }
@@ -815,7 +816,7 @@ struct ReceivedCardDetailView: View {
                         }
                     }
                     .padding()
-                    .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                    .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
                     .padding(.horizontal)
                     .opacity(showFlair ? 1 : 0)
                     .offset(y: showFlair ? 0 : 15)
@@ -842,7 +843,7 @@ struct ReceivedCardDetailView: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
                 .padding(.horizontal)
                 .opacity(showInfo ? 1 : 0)
                 .offset(y: showInfo ? 0 : 15)
@@ -850,7 +851,7 @@ struct ReceivedCardDetailView: View {
                 HStack(spacing: 15) {
                     Button {
                         HapticManager.shared.impact(style: .medium)
-                        let impactHeavy = UIImpactFeedbackGenerator(feedbackStyle: .heavy)
+                        let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
                         impactHeavy.prepare()
                         
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.4)) {
