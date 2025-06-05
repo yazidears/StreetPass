@@ -178,7 +178,7 @@ struct StreetPassApp: App {
             // Use the existing main view (StreetPass_MainView) instead of the nonexistent "_New" variant.
             StreetPass_MainView()
                 .environmentObject(streetPassViewModel)
-                .sheet(isPresented: $streetPassViewModel.isDrawingSheetPresented) {
+                .fullScreenCover(isPresented: $streetPassViewModel.isDrawingSheetPresented) {
                     DrawingEditorSheetView(
                         isPresented: $streetPassViewModel.isDrawingSheetPresented,
                         cardDrawingData: $streetPassViewModel.cardForEditor.drawingData
