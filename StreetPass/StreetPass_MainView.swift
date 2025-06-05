@@ -122,6 +122,7 @@ struct StreetPass_MainView: View {
     @State private var showMainContent = false
     @State private var scrollOffset: CGFloat = 0
     @State private var timeBasedGreeting: String = ""
+    @State private var showResetAlert: Bool = false
 
 
     @AppStorage("favorite_user_ids_json_v1") private var _appStorageFavoriteUserIDsJSON: String = "[]"
@@ -226,6 +227,16 @@ struct StreetPass_MainView: View {
         return NavigationStack {
             mainContent(sortedCards: sortedCards)
                 .background(AppTheme.backgroundColor.ignoresSafeArea())
+                .background(DeviceShakeView())
+                .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
+                    showResetAlert = true
+                }
+                .alert("Reset StreetPass?", isPresented: $showResetAlert) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Reset", role: .destructive) { viewModel.resetAllData() }
+                } message: {
+                    Text("This will erase all data and restart StreetPass.")
+                }
                 .onAppear {
                     timeBasedGreeting = getTimeBasedGreetingLogic() // Refresh on appear
                     withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {

@@ -160,6 +160,31 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
         showInfoMessage(message)
     }
 
+    // MARK: - Reset & Restart Logic
+    func resetAllData() {
+        logViewModel("Resetting all StreetPass data and generating new user ID.")
+
+        bleManager.stop()
+
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "streetPass_PersistentUserID_v1")
+        defaults.removeObject(forKey: "streetPass_LocalUserCard_v2")
+        defaults.removeObject(forKey: "streetPass_ReceivedCards_v2")
+
+        let newID = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        let freshManager = StreetPassBLEManager(userID: newID)
+        freshManager.delegate = self
+        self.bleManager = freshManager
+
+        self.cardForEditor = freshManager.localUserCard
+        self.greetingName = freshManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
+        self.newCardsCountForBanner = 0
+        self.lastErrorMessage = nil
+        self.lastInfoMessage = nil
+
+        bleManager.start()
+    }
+
 
     // MARK: - StreetPassBLEManagerDelegate Conformance
     // SINGLE DEFINITIONS of these delegate methods:
