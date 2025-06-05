@@ -1,14 +1,6 @@
-//
-//  StreetPass_MainView.swift
-//  StreetPass
-//
-//  Created by You on 2025/06/04.
-//
-
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - Share Sheet (Used by Old UI)
 struct ShareSheetView: UIViewControllerRepresentable {
     let activityItems: [Any]
     let applicationActivities: [UIActivity]? = nil
@@ -20,11 +12,116 @@ struct ShareSheetView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
-// MARK: - Main View
+fileprivate class HapticManager {
+    static let shared = HapticManager()
+    private init() {}
+
+    func impact(style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        let generator = UIImpactFeedbackGenerator(style: style)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
+    func notification(type: UINotificationFeedbackGenerator.FeedbackType) {
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(type)
+    }
+}
+
+fileprivate struct PulsatingModifier: ViewModifier {
+    @State private var isPulsing = false
+    let active: Bool
+    let duration: Double
+    let minOpacity: Double
+    let maxScale: Double
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active && isPulsing ? minOpacity : 1.0)
+            .scaleEffect(active && isPulsing ? maxScale : 1.0)
+            .onChange(of: active, initial: true) { oldActive, newActive in
+                if newActive {
+                    isPulsing = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                        withAnimation(Animation.easeInOut(duration: duration).repeatForever(autoreverses: true)) {
+                            isPulsing = true
+                        }
+                    }
+                } else {
+                    withAnimation(.easeInOut(duration: duration / 2)) {
+                        isPulsing = false
+                    }
+                }
+            }
+    }
+}
+
+fileprivate extension View {
+    func pulsating(active: Bool, duration: Double = 1.2, minOpacity: Double = 0.5, maxScale: Double = 1.1) -> some View {
+        self.modifier(PulsatingModifier(active: active, duration: duration, minOpacity: minOpacity, maxScale: maxScale))
+    }
+}
+
+fileprivate struct GlassBackgroundModifier: ViewModifier {
+    var cornerRadius: CGFloat
+    var material: Material
+    var strokeColor: Color
+    var strokeWidth: CGFloat
+    var customShadow: ShadowStyle
+
+    enum ShadowStyle {
+        case none
+        case soft
+        case medium
+        case custom(color: Color, radius: CGFloat, x: CGFloat, y: CGFloat)
+    }
+
+    func body(content: Content) -> some View {
+        let base = content
+            .background(material)
+            .cornerRadius(cornerRadius)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(strokeColor, lineWidth: strokeWidth)
+            )
+        
+        switch customShadow {
+        case .none:
+            return AnyView(base)
+        case .soft:
+            return AnyView(base.shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2))
+        case .medium:
+            return AnyView(base.shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4))
+        case .custom(let color, let radius, let x, let y):
+            return AnyView(base.shadow(color: color, radius: radius, x: x, y: y))
+        }
+    }
+}
+
+fileprivate extension View {
+    func glassBackground(
+        cornerRadius: CGFloat = 15,
+        material: Material = AppTheme.glassMaterialThin,
+        strokeColor: Color = AppTheme.glassBorder,
+        strokeWidth: CGFloat = 1,
+        shadow: GlassBackgroundModifier.ShadowStyle = .medium
+    ) -> some View {
+        self.modifier(GlassBackgroundModifier(cornerRadius: cornerRadius, material: material, strokeColor: strokeColor, strokeWidth: strokeWidth, customShadow: shadow))
+    }
+}
+
+
 struct StreetPass_MainView: View {
     @EnvironmentObject private var viewModel: StreetPassViewModel
     @State private var searchText: String = ""
     private let isForSwiftUIPreview: Bool
+
+    @State private var showHeaderAvatar = false
+    @State private var showHeaderGreeting = false
+    @State private var showMainContent = false
+    @State private var scrollOffset: CGFloat = 0
+
 
     @AppStorage("favorite_user_ids_json_v1") private var _appStorageFavoriteUserIDsJSON: String = "[]"
     private var favoriteUserIDs: Set<String> {
@@ -54,7 +151,6 @@ struct StreetPass_MainView: View {
         }
     }
 
-
     private func cardMatchesSearchText(card: EncounterCard, lowercasedSearchText: String) -> Bool {
         if card.displayName.lowercased().contains(lowercasedSearchText) { return true }
         if card.statusMessage.lowercased().contains(lowercasedSearchText) { return true }
@@ -70,41 +166,121 @@ struct StreetPass_MainView: View {
     }
 
     var body: some View {
-        // 1) Start by filtering & sorting early, outside of any Section
         let allCards = viewModel.recentlyEncounteredCards
-
-        // 1a) Filter by search text if needed
         let lowercasedSearchText = searchText.trimming.lowercased()
         let filteredCards: [EncounterCard] = {
             guard !lowercasedSearchText.isEmpty else { return allCards }
             return allCards.filter { cardMatchesSearchText(card: $0, lowercasedSearchText: lowercasedSearchText) }
         }()
 
-        // 2) Sort: Favorites first, then alphabetically by displayName
         let sortedCards = filteredCards.sorted { a, b in
             let aFav = favoriteUserIDs.contains(a.userID)
             let bFav = favoriteUserIDs.contains(b.userID)
             if aFav && !bFav { return true }
             if !aFav && bFav { return false }
-            return a.displayName < b.displayName
+            return a.displayName.lowercased() < b.displayName.lowercased()
         }
 
         return NavigationStack {
             mainContent(sortedCards: sortedCards)
+                .background(AppTheme.backgroundColor.ignoresSafeArea())
+                .onAppear {
+                    withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
+                        showHeaderAvatar = true
+                    }
+                    withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
+                        showHeaderGreeting = true
+                    }
+                    withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.4)) {
+                         showMainContent = true
+                    }
+                }
         }
     }
 
     @ViewBuilder
     private func mainContent(sortedCards: [EncounterCard]) -> some View {
-        VStack(spacing: 0) {
-            headerSection()
-            connectionsSection(sortedCards: sortedCards)
+        ScrollViewOffsetTracker(scrollOffset: $scrollOffset) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    headerSection()
+                    
+                    searchBar
+                        .padding(.top, -30)
+                        .zIndex(1)
+                        .opacity(showMainContent ? 1 : 0)
+                        .offset(y: showMainContent ? 0 : 20)
+                        .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.1 : 0.4), value: showMainContent)
+
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        RecentCardsSwappedSectionView(
+                            viewModel: viewModel
+                        ) {
+                            viewModel.showInfoMessage("view all recent cards tapped!")
+                            HapticManager.shared.impact(style: .light)
+                        }
+
+                        StatusSectionView(viewModel: viewModel)
+
+                        Button {
+                            viewModel.prepareCardForEditing()
+                            viewModel.openDrawingEditor()
+                            HapticManager.shared.impact(style: .medium)
+                        } label: {
+                            Label("Draw / Edit My Card", systemImage: "pencil.and.scribble")
+                                .font(.headline.weight(.semibold))
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(AppTheme.spAccentYellow)
+                                .foregroundColor(AppTheme.spPrimaryText)
+                                .cornerRadius(12)
+                                .shadow(color: AppTheme.spAccentYellow.opacity(0.5), radius: 8, y: 4)
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom)
+                        .buttonStyle(ScaleDownButtonStyle(scaleFactor: 0.95, opacityFactor: 0.9))
+                        
+                        connectionsSection(sortedCards: sortedCards)
+                    }
+                    .padding(.top)
+                    .opacity(showMainContent ? 1 : 0)
+                    .offset(y: showMainContent ? 0 : 20)
+                    .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.2 : 0.4), value: showMainContent)
+                }
+            }
         }
-        .background(AppTheme.backgroundColor)
+        .scrollDismissesKeyboard(.interactively)
+        .navigationTitle("StreetPass")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(AppTheme.glassMaterialRegular, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                 Text("StreetPass")
+                    .font(.title2.bold())
+                    .foregroundColor(AppTheme.spPrimaryText)
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    viewModel.showInfoMessage("Settings tapped")
+                    HapticManager.shared.impact(style: .light)
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .font(.title2)
+                        .foregroundColor(AppTheme.primaryColor)
+                        .padding(4)
+                        .background(AppTheme.primaryColor.opacity(0.1))
+                        .clipShape(Circle())
+                }
+            }
+        }
     }
 
     @ViewBuilder
     private func headerSection() -> some View {
+        let parallaxFactor: CGFloat = 0.3
+        let headerHeight: CGFloat = 200
+        let dynamicHeight = max(headerHeight, headerHeight - scrollOffset * parallaxFactor)
+        
         VStack(spacing: 0) {
             ZStack(alignment: .bottomLeading) {
                 LinearGradient(
@@ -112,173 +288,207 @@ struct StreetPass_MainView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                .frame(height: 170)
-                .ignoresSafeArea(edges: .top)
+                .frame(height: dynamicHeight)
+                .clipShape(RoundedCornersShape(corners: [.bottomLeft, .bottomRight], radius: 30))
+                .shadow(color: AppTheme.spGradientEnd.opacity(0.6), radius: 12, y: 6)
+                .offset(y: scrollOffset > 0 ? -scrollOffset * parallaxFactor : 0)
 
-                HStack(alignment: .center, spacing: 12) {
+                HStack(alignment: .center, spacing: 15) {
                     Image(systemName: viewModel.myCurrentCard.avatarSymbolName)
-                        .font(.system(size: 40))
+                        .font(.system(size: 48))
                         .foregroundColor(.white)
-                        .padding(12)
-                        .background(Color.white.opacity(0.25))
+                        .padding(15)
+                        .background(
+                            Circle().fill(Color.white.opacity(0.2))
+                                .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
+                        )
                         .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.6), lineWidth: 2))
+                        .opacity(showHeaderAvatar ? 1 : 0)
+                        .scaleEffect(showHeaderAvatar ? 1 : 0.7)
+                        .offset(x: showHeaderAvatar ? 0 : -25, y: showHeaderAvatar ? 0 : 10)
 
-                    VStack(alignment: .leading, spacing: 4) {
+
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("Hi, \(viewModel.greetingName.capitalized)!")
                             .font(.title.bold())
                             .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
 
                         if viewModel.newCardsCountForBanner > 0 {
-                            Text("You have \(viewModel.newCardsCountForBanner) new cards")
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
+                            Label("You have \(viewModel.newCardsCountForBanner) new cards", systemImage: "sparkles.square.filled.on.square")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(AppTheme.spAccentYellow)
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 12)
+                                .background(Color.black.opacity(0.35))
+                                .clipShape(Capsule())
+                                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
                         }
                     }
+                    .opacity(showHeaderGreeting ? 1 : 0)
+                    .offset(x: showHeaderGreeting ? 0 : -25)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 12)
-            }
-
-            searchBar
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // MARK: - Recent Cards Swapped Section
-                    RecentCardsSwappedSectionView(
-                        viewModel: viewModel,
-                        primaryTextColor: AppTheme.primaryColor
-                    ) {
-                        viewModel.showInfoMessage("view all recent cards tapped!")
-                    }
-
-                    // MARK: - Status Section
-                    StatusSectionView(viewModel: viewModel, primaryTextColor: AppTheme.primaryColor)
-
-                    // MARK: - Draw / Edit My Card Button
-                    Button("draw / edit my card") {
-                        viewModel.prepareCardForEditing()
-                        viewModel.openDrawingEditor()
-                    }
-                    .font(.system(size: 14, weight: .medium))
-                    .padding(10)
-                    .frame(maxWidth: .infinity)
-                    .background(AppTheme.primaryColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                    .padding([.horizontal])
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(AppTheme.backgroundColor)
-        }
-        .navigationTitle("StreetPass")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    viewModel.showInfoMessage("Settings tapped")
-                } label: {
-                    Image(systemName: "gearshape.fill")
-                        .font(.title2)
-                        .foregroundColor(AppTheme.primaryColor)
-                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 55)
+                .offset(y: scrollOffset > 0 ? -scrollOffset * (parallaxFactor * 0.8) : 0)
             }
         }
+        .frame(height: headerHeight)
     }
 
     @ViewBuilder
     private var searchBar: some View {
         HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(AppTheme.spSecondaryText)
             TextField("Search encounters...", text: $searchText)
-                .padding(8)
-                .background(Color(.systemGray6))
-                .cornerRadius(8)
+                .textFieldStyle(.plain)
+                .foregroundColor(AppTheme.spPrimaryText)
             if !searchText.isEmpty {
                 Button(action: { self.searchText = "" }) {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.gray)
+                        .foregroundColor(AppTheme.spSecondaryText.opacity(0.8))
                 }
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
-        .padding()
+        .animation(.easeInOut(duration: 0.2), value: searchText.isEmpty)
+        .padding(12)
+        .glassBackground(cornerRadius: 12, material: AppTheme.glassMaterialUltraThin, strokeColor: AppTheme.glassBorderSubtle, shadow: .soft)
+        .padding(.horizontal)
     }
-
+    
     @ViewBuilder
     private func connectionsSection(sortedCards: [EncounterCard]) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // MARK: - Connections List
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("Connections")
-                        .font(.title2)
-                        .fontWeight(.bold)
-                    Spacer()
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Encounters")
+                    .font(.title2.bold())
+                    .foregroundColor(AppTheme.spPrimaryText)
+                Spacer()
+                if !sortedCards.isEmpty {
                     Button(action: {
-                        // Example: Show detailed listing
+                        viewModel.showInfoMessage("See All Encounters tapped")
+                        HapticManager.shared.impact(style: .light)
                     }) {
                         Text("See All")
-                            .font(.subheadline)
+                            .font(.subheadline.weight(.medium))
                             .foregroundColor(AppTheme.primaryColor)
                     }
                 }
-                .padding([.horizontal])
-
-                ForEach(sortedCards) { card in
-                    NavigationLink(destination:
-                        ReceivedCardDetailView(
-                            card: card,
-                            isFavorite: favoriteUserIDs.contains(card.userID),
-                            toggleFavoriteAction: {
-                                changeFavorite(userID: card.userID)
-                            }
-                        )
-                    ) {
-                        HStack(spacing: 12) {
-                            card.getPlaceholderDrawingView()
-                                .frame(width: 50, height: 70)
-                                .background(Color.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color.gray, lineWidth: 1)
-                                )
-                                .cornerRadius(6)
-                                .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(card.displayName)
-                                    .font(.headline)
-                                Text(card.statusMessage)
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            if favoriteUserIDs.contains(card.userID) {
-                                Image(systemName: "star.fill")
-                                    .foregroundColor(.yellow)
-                            }
-                        }
-                        .padding(.vertical, 8)
-                        .padding(.horizontal)
-                        .background(AppTheme.spContentBackground)
-                        .cornerRadius(10)
-                        .shadow(color: .black.opacity(0.1), radius: 3, y: 2)
-                    }
-                    Divider()
-                        .padding(.leading, 72)
-                }
             }
+            .padding(.horizontal)
 
+            if sortedCards.isEmpty && searchText.isEmpty {
+                 VStack(spacing: 12) {
+                    Image(systemName: "person.3.sequence.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(AppTheme.spSecondaryText.opacity(0.6))
+                        .padding(20)
+                        .background(AppTheme.spSecondaryText.opacity(0.05))
+                        .clipShape(Circle())
+                    Text("No Encounters Yet")
+                        .font(.title3.weight(.medium))
+                    Text("Start exploring to meet new people!")
+                        .font(.callout)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+                .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .padding(.horizontal)
+
+            } else if sortedCards.isEmpty && !searchText.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 50))
+                        .foregroundColor(AppTheme.spSecondaryText.opacity(0.6))
+                        .padding(20)
+                        .background(AppTheme.spSecondaryText.opacity(0.05))
+                        .clipShape(Circle())
+                    Text("No Results Found")
+                        .font(.title3.weight(.medium))
+                    Text("Try a different search term for '\(searchText)'.")
+                        .font(.callout)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+                .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .padding(.horizontal)
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(sortedCards) { card in
+                        NavigationLink(destination:
+                            ReceivedCardDetailView(
+                                card: card,
+                                isFavorite: favoriteUserIDs.contains(card.userID),
+                                toggleFavoriteAction: {
+                                    changeFavorite(userID: card.userID)
+                                }
+                            )
+                        ) {
+                            HStack(spacing: 15) {
+                                card.getPlaceholderDrawingView()
+                                    .frame(width: 55, height: 75)
+                                    .background(AppTheme.userSpecificColor(for: card.userID).opacity(0.1))
+                                    .cornerRadius(8)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(AppTheme.userSpecificColor(for: card.userID), lineWidth: 2)
+                                    )
+                                    .shadow(color: AppTheme.userSpecificColor(for: card.userID).opacity(0.25), radius: 3, y: 1)
+
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(card.displayName)
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundColor(AppTheme.spPrimaryText)
+                                        .lineLimit(1)
+                                    Text(card.statusMessage)
+                                        .font(.subheadline)
+                                        .foregroundColor(AppTheme.spSecondaryText)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                if favoriteUserIDs.contains(card.userID) {
+                                    Image(systemName: "star.fill")
+                                        .foregroundColor(AppTheme.spAccentYellow)
+                                        .font(.title3)
+                                        .shadow(color: AppTheme.spAccentYellow.opacity(0.5), radius: 3)
+                                        .transition(.scale(scale: 1.4).combined(with: .opacity))
+                                }
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(AppTheme.spTertiaryText)
+                            }
+                            .padding()
+                            .glassBackground(material: AppTheme.cardBackgroundColor, strokeColor: AppTheme.glassBorderSubtle, shadow: .soft)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .animation(.spring(response: 0.35, dampingFraction: 0.55), value: favoriteUserIDs.contains(card.userID))
+                    }
+                }
+                .padding(.horizontal)
+            }
             Spacer(minLength: 20)
         }
     }
 
-    // Toggle favorite for a userID
     private func changeFavorite(userID: String) {
+        HapticManager.shared.impact(style: .medium)
         var updated = favoriteUserIDs
-        if updated.contains(userID) {
-            updated.remove(userID)
-        } else {
+        let isAdding = !updated.contains(userID)
+        
+        if isAdding {
             updated.insert(userID)
+            HapticManager.shared.notification(type: .success)
+        } else {
+            updated.remove(userID)
         }
+        
         if let encoded = try? JSONEncoder().encode(updated),
            let stringified = String(data: encoded, encoding: .utf8) {
             _appStorageFavoriteUserIDsJSON = stringified
@@ -286,26 +496,28 @@ struct StreetPass_MainView: View {
     }
 }
 
-// MARK: - RecentCardsSwappedSectionView
 struct RecentCardsSwappedSectionView: View {
     @ObservedObject var viewModel: StreetPassViewModel
-    let primaryTextColor: Color
     var onTapAll: () -> Void
+    @State private var cardAppeared: [UUID: Bool] = [:]
+    @State private var sectionVisible = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("recent cards swapped")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(primaryTextColor)
+                Text("Recent Swaps")
+                    .font(.title2.bold())
+                    .foregroundColor(AppTheme.spPrimaryText)
                 Spacer()
                 Button(action: onTapAll) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(primaryTextColor.opacity(0.7))
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(AppTheme.primaryColor.opacity(0.8))
                 }
             }
-            .padding([.horizontal])
+            .padding(.horizontal)
+            .opacity(sectionVisible ? 1 : 0)
+            .offset(y: sectionVisible ? 0 : 15)
 
             let displayCards: [EncounterCard] = {
                 if viewModel.recentlyEncounteredCards.isEmpty {
@@ -316,140 +528,195 @@ struct RecentCardsSwappedSectionView: View {
                         EncounterCard.placeholderCard(drawingIdentifier: "smiley_face")
                     ]
                 } else {
-                    return Array(viewModel.recentlyEncounteredCards.prefix(4))
+                    return Array(viewModel.recentlyEncounteredCards.prefix(6))
                 }
             }()
 
             if displayCards.isEmpty {
-                Text("no cards swapped yet…")
-                    .font(.caption)
-                    .foregroundColor(.gray)
+                Text("Swap cards with others to see them here!")
+                    .font(.callout)
+                    .foregroundColor(AppTheme.spSecondaryText)
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .center)
+                    .glassBackground(material: AppTheme.cardBackgroundColor, cornerRadius: 10, shadow: .soft)
+                    .padding(.horizontal)
+                    .opacity(sectionVisible ? 1 : 0)
+                    .offset(y: sectionVisible ? 0 : 15)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(displayCards) { card in
+                    HStack(spacing: 15) {
+                        ForEach(Array(displayCards.enumerated()), id: \.element.id) { index, card in
                             RecentCardItemView(card: card) {
                                 viewModel.showInfoMessage("tapped on card id: \(card.id.uuidString.prefix(4))")
+                                HapticManager.shared.impact(style: .light)
+                            }
+                            .opacity(cardAppeared[card.id, default: false] ? 1 : 0)
+                            .rotation3DEffect(
+                                .degrees(cardAppeared[card.id, default: false] ? 0 : -15),
+                                axis: (x: 0, y: 1, z: 0),
+                                anchor: .leading
+                            )
+                            .offset(y: cardAppeared[card.id, default: false] ? 0 : 15)
+                            .onAppear {
+                                if sectionVisible {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.08 * Double(index))) {
+                                        cardAppeared[card.id] = true
+                                    }
+                                }
+                            }
+                            .onChange(of: sectionVisible) { _, newVisible in
+                                if newVisible {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.08 * Double(index))) {
+                                        cardAppeared[card.id] = true
+                                    }
+                                } else {
+                                    cardAppeared[card.id] = false
+                                }
                             }
                         }
                     }
-                    .padding(.vertical, 5)
+                    .padding(.vertical, 10)
                     .padding(.horizontal)
                 }
             }
         }
-        .padding(.vertical)
+        .onAppear {
+            withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.1)) {
+                sectionVisible = true
+            }
+        }
     }
 }
 
-// MARK: - RecentCardItemView
 struct RecentCardItemView: View {
     let card: EncounterCard
     var onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 card.getPlaceholderDrawingView()
-                    .frame(width: 85, height: 120)
-                    .background(Color.white)
+                    .frame(width: 90, height: 130)
+                    .background(AppTheme.userSpecificColor(for: card.userID).opacity(0.05))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.black, lineWidth: 2.5)
+                            .stroke(AppTheme.userSpecificColor(for: card.userID), lineWidth: 2.5)
                     )
                     .cornerRadius(12)
-                    .shadow(color: .black.opacity(0.1), radius: 2, y: 1)
+                    .glassBackground(cornerRadius: 12, material: AppTheme.glassMaterialUltraThin, strokeColor: AppTheme.userSpecificColor(for: card.userID).opacity(0.7), strokeWidth: 1.5, shadow: .custom(color: AppTheme.userSpecificColor(for: card.userID).opacity(0.3), radius: 6, x:0, y:3))
+                    
 
-                Circle()
-                    .fill(Color.gray.opacity(0.4))
-                    .frame(width: 10, height: 10)
+                Text(card.displayName.isEmpty ? "Encounter" : card.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(AppTheme.spPrimaryText)
+                    .lineLimit(1)
+                    .frame(width: 90)
             }
         }
+        .buttonStyle(ScaleDownButtonStyle(scaleFactor: 0.94, opacityFactor: 0.9))
     }
 }
 
-// MARK: - StatusSectionView
 struct StatusSectionView: View {
     @ObservedObject var viewModel: StreetPassViewModel
-    let primaryTextColor: Color
+    @State private var sectionVisible = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("status")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(primaryTextColor)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Device Status")
+                .font(.title2.bold())
+                .foregroundColor(AppTheme.spPrimaryText)
+                .padding(.horizontal)
+                .opacity(sectionVisible ? 1 : 0)
+                .offset(y: sectionVisible ? 0 : 15)
 
-            HStack(spacing: 12) {
-                StatusBoxView(
-                    title: viewModel.isBluetoothOn ? "connected" : "offline",
-                    subtitle: viewModel.isBluetoothOn ? "currently" : "check bluetooth",
-                    mainColor: primaryTextColor
-                )
-                StatusBoxView(
-                    title: "\(viewModel.recentlyEncounteredCards.count)",
-                    subtitle: "connections",
-                    mainColor: primaryTextColor
-                )
-                let adStatus = viewModel.isAdvertisingActive ? "on" : "off"
-                let scanStatus = viewModel.isScanningActive ? "on" : "off"
-                let spassStatus = (viewModel.isAdvertisingActive || viewModel.isScanningActive) ? "on" : "off"
 
-                StatusBoxFullWidthView(
-                    text: "advertising \(adStatus), scanning \(scanStatus), spass \(spassStatus)".lowercased(),
-                    mainColor: primaryTextColor
+            VStack(spacing: 10) {
+                StatusBoxView(
+                    title: viewModel.isBluetoothOn ? "Bluetooth Active" : "Bluetooth Offline",
+                    subtitle: viewModel.isBluetoothOn ? "Ready to connect" : "Enable Bluetooth for StreetPass",
+                    iconName: viewModel.isBluetoothOn ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right.slash.circle.fill",
+                    mainColor: viewModel.isBluetoothOn ? AppTheme.positiveColor : AppTheme.warningColor,
+                    isPulsingActive: viewModel.isBluetoothOn
                 )
+                .opacity(sectionVisible ? 1 : 0)
+                .offset(y: sectionVisible ? 0 : 15)
+                .animation(.spring(response: 0.4, dampingFraction: 0.6).delay(sectionVisible ? 0.1 : 0), value: sectionVisible)
+                
+                let adStatus = viewModel.isAdvertisingActive ? "ON" : "OFF"
+                let scanStatus = viewModel.isScanningActive ? "ON" : "OFF"
+                let spassOverallStatus = (viewModel.isAdvertisingActive || viewModel.isScanningActive)
+                
+                StatusBoxView(
+                    title: "StreetPass \(spassOverallStatus ? "Active" : "Inactive")",
+                    subtitle: "Advertising: \(adStatus), Scanning: \(scanStatus)",
+                    iconName: spassOverallStatus ? "network.badge.shield.half.filled" : "network.slash",
+                    mainColor: spassOverallStatus ? AppTheme.positiveColor : AppTheme.primaryColor.opacity(0.8),
+                    isPulsingActive: spassOverallStatus
+                )
+                .opacity(sectionVisible ? 1 : 0)
+                .offset(y: sectionVisible ? 0 : 15)
+                .animation(.spring(response: 0.4, dampingFraction: 0.6).delay(sectionVisible ? 0.2 : 0), value: sectionVisible)
             }
             .padding(.horizontal)
         }
-        .padding(.vertical)
+        .onAppear {
+            withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.2)) {
+                sectionVisible = true
+            }
+        }
     }
 }
 
 struct StatusBoxView: View {
     let title: String
     let subtitle: String
+    let iconName: String
     let mainColor: Color
+    let isPulsingActive: Bool
 
     var body: some View {
-        VStack {
-            Text(title.uppercased())
-                .font(.system(size: 14, weight: .bold))
+        HStack(spacing: 15) {
+            Image(systemName: iconName)
+                .font(.title)
                 .foregroundColor(mainColor)
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+                .frame(width: 35, height: 35)
+                .padding(8)
+                .background(mainColor.opacity(0.15))
+                .clipShape(Circle())
+                .pulsating(active: isPulsingActive, duration: 1.5, minOpacity: 0.3, maxScale: 1.25)
+                .shadow(color: mainColor.opacity(0.3), radius: isPulsingActive ? 8 : 3, y: 2)
+                
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundColor(AppTheme.spPrimaryText)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(AppTheme.spSecondaryText)
+                    .lineLimit(2)
+            }
+            Spacer()
         }
-        .padding()
-        .background(mainColor.opacity(0.1))
-        .cornerRadius(8)
+        .padding(12)
+        .glassBackground(material: AppTheme.cardBackgroundColor, strokeColor: mainColor.opacity(0.3), strokeWidth: 1, shadow: .custom(color: mainColor.opacity(0.1), radius: 4, x:0, y:2))
     }
 }
 
-struct StatusBoxFullWidthView: View {
-    let text: String
-    let mainColor: Color
-
-    var body: some View {
-        Text(text.uppercased())
-            .font(.system(size: 12, weight: .bold))
-            .foregroundColor(mainColor)
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(mainColor.opacity(0.05))
-            .cornerRadius(8)
-    }
-}
-
-// MARK: - ReceivedCardDetailView
 struct ReceivedCardDetailView: View {
     let card: EncounterCard
     @State var isFavorite: Bool
     let toggleFavoriteAction: () -> Void
 
-    private let drawingDisplayMaxHeight: CGFloat = 250
+    private let drawingDisplayMaxHeight: CGFloat = 300
     private let userColor: Color
+    @State private var showAvatarAndName = false
+    @State private var showFlair = false
+    @State private var showInfo = false
+    @State private var showActions = false
+    @State private var showDrawing = false
+
 
     init(
         card: EncounterCard,
@@ -470,136 +737,198 @@ struct ReceivedCardDetailView: View {
                     .scaledToFit()
                     .frame(maxWidth: .infinity, maxHeight: drawingDisplayMaxHeight)
                     .background(Color.white)
-                    .cornerRadius(10)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(userColor.opacity(0.5), lineWidth: 2)
-                    )
-                    .shadow(color: userColor.opacity(0.3), radius: 6, x: 0, y: 4)
-                    .padding(.horizontal)
+                    .cornerRadius(15)
+                    .glassBackground(cornerRadius:15, material: AppTheme.glassMaterialUltraThin, strokeColor: userColor.opacity(0.5), strokeWidth: 2, shadow: .custom(color: userColor.opacity(0.3), radius: 10, x:0, y:6))
+                    .padding()
+                    
             } else {
-                VStack {
-                    Image(systemName: "eye.slash.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(userColor.opacity(0.6))
+                VStack(spacing: 12) {
+                    Image(systemName: "eye.slash.circle.fill")
+                        .font(.system(size: 70))
+                        .foregroundColor(userColor.opacity(0.7))
                     Text("No Drawing Shared")
-                        .font(.title3)
-                        .fontWeight(.medium)
-                        .foregroundColor(userColor.opacity(0.8))
+                        .font(.title2.weight(.medium))
+                        .foregroundColor(userColor.opacity(0.9))
+                    Text("This user hasn't shared a drawing on their card.")
+                        .font(.callout)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                 }
                 .frame(maxWidth: .infinity, minHeight: drawingDisplayMaxHeight * 0.6)
-                .background(userColor.opacity(0.1))
-                .cornerRadius(10)
-                .padding(.horizontal)
+                .glassBackground(material: userColor.opacity(0.05), strokeColor: userColor.opacity(0.15), strokeWidth: 1.5, shadow: .soft)
+                .padding()
             }
         }
+        .opacity(showDrawing ? 1 : 0)
+        .scaleEffect(showDrawing ? 1 : 0.85)
+        .offset(y: showDrawing ? 0 : 20)
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 18) {
+            VStack(spacing: 24) {
                 drawingSection
 
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     Image(systemName: card.avatarSymbolName)
-                        .font(.system(size: 60))
-                        .padding(15)
+                        .font(.system(size: 70))
+                        .padding(20)
                         .foregroundColor(userColor)
-                        .background(userColor.opacity(0.15).gradient)
+                        .background(
+                            Circle()
+                                .fill(userColor.opacity(0.1))
+                                .glassBackground(cornerRadius: 60, material: AppTheme.glassMaterialThin, strokeColor: userColor.opacity(0.3), strokeWidth: 2, shadow: .custom(color: userColor.opacity(0.2), radius:5, x:0,y:3))
+                        )
                         .clipShape(Circle())
-                        .shadow(color: userColor.opacity(0.3), radius: 5, x: 0, y: 3)
+                        .overlay(Circle().strokeBorder(userColor, lineWidth: 3.5))
+                        .shadow(color: userColor.opacity(0.4), radius: 8, x:0, y:4)
+
 
                     Text(card.displayName)
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(AppTheme.spPrimaryText)
 
                     Text(card.statusMessage)
-                        .font(.body)
-                        .foregroundColor(.secondary)
+                        .font(.title3)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12)
+                .padding(.vertical)
+                .opacity(showAvatarAndName ? 1 : 0)
+                .offset(y: showAvatarAndName ? 0 : 15)
 
-                VStack(spacing: 8) {
-                    if let t1 = card.flairField1Title,
-                       let v1 = card.flairField1Value,
-                       !t1.trimming.isEmpty || !v1.trimming.isEmpty {
-                        FlairDisplayRow(title: t1, value: v1, icon: "rosette", iconColor: userColor)
+                if card.flairField1Title != nil || card.flairField1Value != nil || card.flairField2Title != nil || card.flairField2Value != nil {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty {
+                            FlairDisplayRow(title: t1, value: v1, icon: "rosette", iconColor: userColor)
+                        }
+                        if (card.flairField1Title != nil || card.flairField1Value != nil) &&
+                           (card.flairField2Title != nil || card.flairField2Value != nil) &&
+                           !(card.flairField1Title?.trimming.isEmpty ?? true && card.flairField1Value?.trimming.isEmpty ?? true) &&
+                           !(card.flairField2Title?.trimming.isEmpty ?? true && card.flairField2Value?.trimming.isEmpty ?? true) {
+                            Divider().padding(.vertical, 4)
+                        }
+                        if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty {
+                            FlairDisplayRow(title: t2, value: v2, icon: "star.circle.fill", iconColor: userColor)
+                        }
                     }
-                    if (card.flairField1Title != nil || card.flairField1Value != nil) &&
-                       (card.flairField2Title != nil || card.flairField2Value != nil) {
-                        Divider().padding(.vertical, 4)
-                    }
-                    if let t2 = card.flairField2Title,
-                       let v2 = card.flairField2Value,
-                       !t2.trimming.isEmpty || !v2.trimming.isEmpty {
-                        FlairDisplayRow(title: t2, value: v2, icon: "star.circle", iconColor: userColor)
-                    }
+                    .padding()
+                    .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                    .padding(.horizontal)
+                    .opacity(showFlair ? 1 : 0)
+                    .offset(y: showFlair ? 0 : 15)
                 }
-                .padding(.horizontal)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "number.square")
-                            .foregroundColor(userColor)
+                
+                VStack(alignment: .leading, spacing: 10) {
+                    Label {
                         Text("Schema Version: \(card.cardSchemaVersion)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Image(systemName: "clock.arrow.circlepath")
+                    } icon: {
+                        Image(systemName: "number.square.fill")
                             .foregroundColor(userColor)
-                        // Changed `.datetime` to `.date`
-                        Text("Last Updated by User: \(card.lastUpdated, style: .date)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
-                }
-                .padding(.horizontal)
+                    .font(.caption)
+                    .foregroundColor(AppTheme.spSecondaryText)
 
-                HStack {
+                    Label {
+                        Text("Last Updated: \(card.lastUpdated, style: .date) at \(card.lastUpdated, style: .time)")
+                    } icon: {
+                        Image(systemName: "clock.fill")
+                             .foregroundColor(userColor)
+                    }
+                    .font(.caption)
+                    .foregroundColor(AppTheme.spSecondaryText)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassBackground(material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .padding(.horizontal)
+                .opacity(showInfo ? 1 : 0)
+                .offset(y: showInfo ? 0 : 15)
+
+                HStack(spacing: 15) {
                     Button {
-                        toggleFavoriteAction()
-                        self.isFavorite.toggle()
+                        HapticManager.shared.impact(style: .medium)
+                        let impactHeavy = UIImpactFeedbackGenerator(feedbackStyle: .heavy)
+                        impactHeavy.prepare()
+                        
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.4)) {
+                            toggleFavoriteAction()
+                            self.isFavorite.toggle()
+                            if self.isFavorite {
+                                impactHeavy.impactOccurred()
+                            }
+                        }
                     } label: {
                         Label(
-                            isFavorite ? "Unfavorite" : "Favorite",
+                            isFavorite ? "Favorited" : "Favorite",
                             systemImage: isFavorite ? "star.fill" : "star"
                         )
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
                     }
-                    .tint(isFavorite ? .yellow : AppTheme.primaryColor)
+                    .buttonStyle(.borderedProminent)
+                    .tint(isFavorite ? AppTheme.spAccentYellow : userColor.opacity(0.85))
+                    .controlSize(.large)
+                    .shadow(color: (isFavorite ? AppTheme.spAccentYellow : userColor).opacity(0.4), radius: isFavorite ? 10 : 5, y: isFavorite ? 5 : 2)
 
-                    Spacer()
 
                     Button {
-                        // Example action: share card
+                        HapticManager.shared.impact(style: .light)
+                        print("Share card \(card.id.uuidString.prefix(4)) tapped - (placeholder action)")
                     } label: {
-                        Image(systemName: "square.and.arrow.up")
+                        Label("Share", systemImage: "square.and.arrow.up")
+                            .font(.headline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
                     }
-                    .tint(AppTheme.primaryColor)
+                    .buttonStyle(.bordered)
+                    .tint(userColor)
+                    .controlSize(.large)
                 }
-                .padding(.horizontal)
+                .padding([.horizontal, .bottom])
+                .opacity(showActions ? 1 : 0)
+                .offset(y: showActions ? 0 : 15)
             }
         }
-        .navigationTitle("Card Details")
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.05)) { showDrawing = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.15)) { showAvatarAndName = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.25)) { showFlair = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.35)) { showInfo = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.45)) { showActions = true }
+        }
+        .background(
+            LinearGradient(
+                colors: [userColor.opacity(0.15), AppTheme.backgroundColor, AppTheme.backgroundColor],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
+        .navigationTitle(card.displayName)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    toggleFavoriteAction()
-                    self.isFavorite.toggle()
+                    HapticManager.shared.impact(style: .medium)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.4)) {
+                        toggleFavoriteAction()
+                        self.isFavorite.toggle()
+                    }
                 } label: {
-                    Label(
-                        isFavorite ? "Unfavorite" : "Favorite",
-                        systemImage: isFavorite ? "star.fill" : "star"
-                    )
+                    Image(systemName: isFavorite ? "star.fill" : "star")
+                        .imageScale(.large)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(isFavorite ? AppTheme.spAccentYellow : AppTheme.primaryColor, isFavorite ? AppTheme.spAccentYellow.opacity(0.5) : AppTheme.primaryColor.opacity(0.3))
                 }
-                .tint(isFavorite ? .yellow : AppTheme.primaryColor)
+                .font(.title2)
+                .scaleEffect(isFavorite ? 1.1 : 1.0)
             }
         }
     }
 }
 
-// MARK: - FlairDisplayRow
 struct FlairDisplayRow: View {
     let title: String
     let value: String
@@ -607,25 +936,71 @@ struct FlairDisplayRow: View {
     let iconColor: Color
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Image(systemName: icon)
+                .font(.title2.weight(.medium))
                 .foregroundColor(iconColor)
+                .frame(width: 30, alignment: .center)
+                .shadow(color: iconColor.opacity(0.3), radius: 2)
             VStack(alignment: .leading) {
-                Text(title)
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
-                Text(value)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text(title.isEmpty ? "Info" : title)
+                    .font(.headline)
+                    .foregroundColor(AppTheme.spPrimaryText)
+                Text(value.isEmpty ? "Not specified" : value)
+                    .font(.callout)
+                    .foregroundColor(AppTheme.spSecondaryText)
             }
             Spacer()
         }
+        .padding(.vertical, 6)
     }
 }
+
+struct ScaleDownButtonStyle: ButtonStyle {
+    var scaleFactor: CGFloat = 0.97
+    var opacityFactor: CGFloat = 0.9
+    
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scaleFactor : 1.0)
+            .opacity(configuration.isPressed ? opacityFactor : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+struct RoundedCornersShape: Shape {
+    var corners: UIRectCorner
+    var radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
+    }
+}
+
+struct ScrollViewOffsetTracker<Content: View>: View {
+    @Binding var scrollOffset: CGFloat
+    let content: () -> Content
+
+    var body: some View {
+        content()
+            .background(GeometryReader { geo -> Color in
+                DispatchQueue.main.async {
+                    self.scrollOffset = -geo.frame(in: .named("scrollView")).origin.y
+                }
+                return Color.clear
+            })
+            .coordinateSpace(name: "scrollView")
+    }
+}
+
 
 fileprivate extension String {
     var trimming: String {
         self.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
-
