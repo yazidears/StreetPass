@@ -121,6 +121,7 @@ struct StreetPass_MainView: View {
     @State private var showHeaderGreeting = false
     @State private var showMainContent = false
     @State private var scrollOffset: CGFloat = 0
+    @State private var timeBasedGreeting: String = ""
 
 
     @AppStorage("favorite_user_ids_json_v1") private var _appStorageFavoriteUserIDsJSON: String = "[]"
@@ -163,7 +164,48 @@ struct StreetPass_MainView: View {
 
     init(isForSwiftUIPreview: Bool = false) {
         self.isForSwiftUIPreview = isForSwiftUIPreview
+        _timeBasedGreeting = State(initialValue: getTimeBasedGreetingLogic())
     }
+    
+    private func getTimeBasedGreetingLogic() -> String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let greetings: [String]
+
+        switch hour {
+        case 4..<7: // Early Morning (4 AM - 6:59 AM)
+            greetings = [
+                "Early bird, huh?", "Sun's barely up, good to see ya!", "Morning's quiet magic is here.",
+                "Hope you've got coffee brewing!", "Dawn's breaking, how are you?", "A fresh start to the day!",
+                "Quiet moments before the rush.", "Wishing you a peaceful morning."
+            ]
+        case 7..<12: // Morning (7 AM - 11:59 AM)
+            greetings = [
+                "Good mornin'!", "Hope your day's off to a great start!", "Bright morning to ya!",
+                "What's the plan for today?", "Enjoying the morning vibes?", "Hello there, sunshine!",
+                "May your coffee be strong today!", "Ready to seize the day?"
+            ]
+        case 12..<17: // Afternoon (12 PM - 4:59 PM)
+            greetings = [
+                "Good afternoon!", "Hope your afternoon is going well.", "How's the day treating you?",
+                "Taking a break, or powering through?", "Afternoon vibes are in full swing!", "Sun's high, hope your spirits are too!",
+                "Keep that energy up!", "Making the most of the afternoon?"
+            ]
+        case 17..<21: // Evening (5 PM - 8:59 PM)
+            greetings = [
+                "Good evening!", "How's the evening treating you?", "Winding down, or just getting started?",
+                "Hope you had a wonderful day.", "Evening's here, time to relax a bit!", "The stars will be out soon.",
+                "Enjoy the evening calm.", "What's cookin' tonight? Smells good!"
+            ]
+        default: // Late Night (9 PM - 3:59 AM)
+            greetings = [
+                "Burning the midnight oil?", "Late night explorer, I see.", "Hope you're having a peaceful night.",
+                "The world's quiet now, isn't it?", "Sweet dreams, or more adventures ahead?", "Night owl greetings to you!",
+                "Wishing you a restful night's journey.", "Almost tomorrow, or still today for you?"
+            ]
+        }
+        return greetings.randomElement() ?? "Hello there!"
+    }
+
 
     var body: some View {
         let allCards = viewModel.recentlyEncounteredCards
@@ -185,6 +227,7 @@ struct StreetPass_MainView: View {
             mainContent(sortedCards: sortedCards)
                 .background(AppTheme.backgroundColor.ignoresSafeArea())
                 .onAppear {
+                    timeBasedGreeting = getTimeBasedGreetingLogic() // Refresh on appear
                     withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
                         showHeaderAvatar = true
                     }
@@ -250,29 +293,7 @@ struct StreetPass_MainView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .navigationTitle("StreetPass")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(AppTheme.glassMaterialRegular, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                 Text("StreetPass")
-                    .font(.title2.bold())
-                    .foregroundColor(AppTheme.spPrimaryText)
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    viewModel.showInfoMessage("Settings tapped")
-                    HapticManager.shared.impact(style: .light)
-                } label: {
-                    Image(systemName: "gearshape.fill")
-                        .font(.title2)
-                        .foregroundColor(AppTheme.primaryColor)
-                        .padding(4)
-                        .background(AppTheme.primaryColor.opacity(0.1))
-                        .clipShape(Circle())
-                }
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     @ViewBuilder
@@ -310,10 +331,13 @@ struct StreetPass_MainView: View {
 
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Hi, \(viewModel.greetingName.capitalized)!")
+                        Text(timeBasedGreeting)
                             .font(.title.bold())
                             .foregroundColor(.white)
                             .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+
 
                         if viewModel.newCardsCountForBanner > 0 {
                             Label("You have \(viewModel.newCardsCountForBanner) new cards", systemImage: "sparkles.square.filled.on.square")
@@ -334,7 +358,7 @@ struct StreetPass_MainView: View {
                 .offset(y: scrollOffset > 0 ? -scrollOffset * (parallaxFactor * 0.8) : 0)
             }
         }
-        .frame(height: headerHeight)
+        .frame(minHeight: headerHeight) // Use minHeight to allow expansion if greeting is long
     }
 
     @ViewBuilder
