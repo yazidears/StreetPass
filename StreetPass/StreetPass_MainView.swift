@@ -88,7 +88,7 @@ struct StreetPass_MainView: View {
             return a.displayName < b.displayName
         }
 
-        return NavigationView {
+        return NavigationStack {
             mainContent(sortedCards: sortedCards)
         }
     }
@@ -99,11 +99,35 @@ struct StreetPass_MainView: View {
             headerSection()
             connectionsSection(sortedCards: sortedCards)
         }
+        .background(AppTheme.backgroundColor)
     }
 
     @ViewBuilder
     private func headerSection() -> some View {
         VStack(spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                LinearGradient(
+                    colors: [AppTheme.spGradientStart, AppTheme.spGradientMid, AppTheme.spGradientEnd],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(height: 140)
+                .ignoresSafeArea(edges: .top)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Hi, \(viewModel.greetingName.capitalized)!")
+                        .font(.largeTitle.bold())
+                        .foregroundColor(.white)
+
+                    if viewModel.newCardsCountForBanner > 0 {
+                        Text("You have \(viewModel.newCardsCountForBanner) new cards")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                }
+                .padding()
+            }
+
             // Search Bar
             HStack {
                 TextField("Search encounters...", text: $searchText)
@@ -146,6 +170,8 @@ struct StreetPass_MainView: View {
                     .padding([.horizontal])
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.backgroundColor)
         }
         .navigationTitle("StreetPass")
         .toolbar {
@@ -217,6 +243,9 @@ struct StreetPass_MainView: View {
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal)
+                        .background(Color.white)
+                        .cornerRadius(8)
+                        .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
                     }
                     Divider()
                         .padding(.leading, 72)
