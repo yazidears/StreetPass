@@ -141,6 +141,16 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
         }
     }
 
+    // Convenience wrapper used by views when a value has been copied to the
+    // system clipboard. Shows an informational message and triggers haptic
+    // feedback where available.
+    func showInfoMessageForCopyToClipboard(_ message: String) {
+        showInfoMessage(message)
+        #if os(iOS)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        #endif
+    }
+
     // MARK: - StreetPassBLEManagerDelegate Conformance
     // SINGLE DEFINITIONS of these delegate methods:
     func bleManagerDidUpdateState(bluetoothState: CBManagerState) {
