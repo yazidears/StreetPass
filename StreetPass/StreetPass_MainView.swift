@@ -54,6 +54,7 @@ struct StreetPass_MainView: View {
         }
     }
 
+
     private func cardMatchesSearchText(card: EncounterCard, lowercasedSearchText: String) -> Bool {
         if card.displayName.lowercased().contains(lowercasedSearchText) { return true }
         if card.statusMessage.lowercased().contains(lowercasedSearchText) { return true }
@@ -111,37 +112,34 @@ struct StreetPass_MainView: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
-                .frame(height: 140)
+                .frame(height: 170)
                 .ignoresSafeArea(edges: .top)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Hi, \(viewModel.greetingName.capitalized)!")
-                        .font(.largeTitle.bold())
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: viewModel.myCurrentCard.avatarSymbolName)
+                        .font(.system(size: 40))
                         .foregroundColor(.white)
+                        .padding(12)
+                        .background(Color.white.opacity(0.25))
+                        .clipShape(Circle())
 
-                    if viewModel.newCardsCountForBanner > 0 {
-                        Text("You have \(viewModel.newCardsCountForBanner) new cards")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.9))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Hi, \(viewModel.greetingName.capitalized)!")
+                            .font(.title.bold())
+                            .foregroundColor(.white)
+
+                        if viewModel.newCardsCountForBanner > 0 {
+                            Text("You have \(viewModel.newCardsCountForBanner) new cards")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.9))
+                        }
                     }
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.bottom, 12)
             }
 
-            // Search Bar
-            HStack {
-                TextField("Search encounters...", text: $searchText)
-                    .padding(8)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(8)
-                if !searchText.isEmpty {
-                    Button(action: { self.searchText = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.gray)
-                    }
-                }
-            }
-            .padding()
+            searchBar
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -185,6 +183,23 @@ struct StreetPass_MainView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var searchBar: some View {
+        HStack {
+            TextField("Search encounters...", text: $searchText)
+                .padding(8)
+                .background(Color(.systemGray6))
+                .cornerRadius(8)
+            if !searchText.isEmpty {
+                Button(action: { self.searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.gray)
+                }
+            }
+        }
+        .padding()
     }
 
     @ViewBuilder
@@ -243,9 +258,9 @@ struct StreetPass_MainView: View {
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal)
-                        .background(Color.white)
-                        .cornerRadius(8)
-                        .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
+                        .background(AppTheme.spContentBackground)
+                        .cornerRadius(10)
+                        .shadow(color: .black.opacity(0.1), radius: 3, y: 2)
                     }
                     Divider()
                         .padding(.leading, 72)
