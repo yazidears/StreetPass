@@ -175,8 +175,17 @@ struct StreetPassApp: App {
 
     private func binding<T>(_ keyPath: ReferenceWritableKeyPath<StreetPassViewModel, T>) -> Binding<T> {
         Binding(
-            get: { viewModel![keyPath: keyPath] },
-            set: { viewModel?[keyPath: keyPath] = $0 }
+            get: {
+                guard let vm = viewModel else {
+                    fatalError("StreetPassViewModel not initialized before binding access")
+                }
+                return vm[keyPath: keyPath]
+            },
+            set: { newValue in
+                guard let _ = viewModel else { return }
+                viewModel![keyPath: keyPath] = newValue
+            }
+
         )
     }
 
