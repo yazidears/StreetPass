@@ -1,11 +1,12 @@
+// AppTheme.swift
 import SwiftUI
 
 struct AppTheme {
     static let primaryColor = Color(red: 0.1, green: 0.25, blue: 0.7)
-    static let secondaryColor = Color(red: 0.98, green: 0.82, blue: 0.22)
+    static let secondaryColor = Color(red: 0.98, green: 0.82, blue: 0.22) // spAccentYellow
 
     static let backgroundColor = Color(UIColor.systemGroupedBackground)
-    static let cardBackgroundColor = Material.thin
+    static let cardBackgroundColor = Material.thin // Used for list items, flair boxes etc.
     static let glassMaterialUltraThin = Material.ultraThinMaterial
     static let glassMaterialThin = Material.thinMaterial
     static let glassMaterialRegular = Material.regularMaterial
@@ -21,20 +22,18 @@ struct AppTheme {
     static let spGradientMid = primaryColor
     static let spGradientEnd = Color(red: 0.5, green: 0.15, blue: 0.4)
     
-    static let spContentBackground = Color(UIColor.systemBackground)
+    static let spContentBackground = Color(UIColor.systemBackground) // For text fields on dark bg etc.
     static let spPrimaryText = Color(UIColor.label)
     static let spSecondaryText = Color(UIColor.secondaryLabel)
     static let spTertiaryText = Color(UIColor.tertiaryLabel)
     static let spAccentYellow = secondaryColor
-    static let spArrowRed = Color(red: 0.7, green: 0.1, blue: 0.1)
     
     static let glassBorder = Color.white.opacity(0.2)
     static let glassBorderSubtle = Color.white.opacity(0.1)
 
-
     static func userSpecificColor(for userID: String) -> Color {
         let hash = abs(userID.hashValue)
         let hue = Double(hash % 360) / 360.0
-        return Color(hue: hue, saturation: 0.9, brightness: 0.9)
+        return Color(hue: hue, saturation: 0.85, brightness: 0.9) // Slightly adjusted
     }
 }
