@@ -171,20 +171,43 @@ struct StreetPassApp: App {
         }
     }
 
-    @StateObject var streetPassViewModel = StreetPassViewModel(userID: getPersistentAppUserID())
+    @State private var viewModel: StreetPassViewModel? = nil
+
+    private func binding<T>(_ keyPath: ReferenceWritableKeyPath<StreetPassViewModel, T>) -> Binding<T> {
+        Binding(
+            get: {
+                guard let vm = viewModel else {
+                    fatalError("StreetPassViewModel not initialized before binding access")
+                }
+                return vm[keyPath: keyPath]
+            },
+            set: { newValue in
+                guard let _ = viewModel else { return }
+                viewModel![keyPath: keyPath] = newValue
+            }
+        )
+    }
 
     var body: some Scene {
         WindowGroup {
-            // Use the existing main view (StreetPass_MainView) instead of the nonexistent "_New" variant.
-            StreetPass_MainView()
-                .environmentObject(streetPassViewModel)
-                .fullScreenCover(isPresented: $streetPassViewModel.isDrawingSheetPresented) {
-                    DrawingEditorSheetView(
-                        isPresented: $streetPassViewModel.isDrawingSheetPresented,
-                        cardDrawingData: $streetPassViewModel.cardForEditor.drawingData
-                    )
-                    .interactiveDismissDisabled()
+            Group {
+                if let vm = viewModel {
+                    StreetPass_MainView()
+                        .environmentObject(vm)
+                        .fullScreenCover(isPresented: binding(\.isDrawingSheetPresented)) {
+                            DrawingEditorSheetView(
+                                isPresented: binding(\.isDrawingSheetPresented),
+                                cardDrawingData: binding(\.cardForEditor.drawingData)
+                            )
+                            .interactiveDismissDisabled()
+                        }
+                } else {
+                    ProgressView("Starting StreetPass…")
+                        .task {
+                            self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
+                        }
                 }
+            }
         }
     }
 }
