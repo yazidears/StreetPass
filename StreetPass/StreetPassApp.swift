@@ -210,6 +210,7 @@ struct StreetPassApp: App {
                             DispatchQueue.main.async {
                                 self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
                             }
+
                         }
                 }
             }
