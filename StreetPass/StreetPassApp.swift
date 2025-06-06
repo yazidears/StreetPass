@@ -171,44 +171,30 @@ struct StreetPassApp: App {
         }
     }
 
-    @State private var viewModel: StreetPassViewModel? = nil
+    @StateObject private var viewModel: StreetPassViewModel
+
+    init() {
+        _viewModel = StateObject(wrappedValue: StreetPassViewModel(userID: Self.getPersistentAppUserID()))
+    }
 
     private func binding<T>(_ keyPath: ReferenceWritableKeyPath<StreetPassViewModel, T>) -> Binding<T> {
         Binding(
-            get: {
-                guard let vm = viewModel else {
-                    fatalError("StreetPassViewModel not initialized before binding access")
-                }
-                return vm[keyPath: keyPath]
-            },
-            set: { newValue in
-                guard let _ = viewModel else { return }
-                viewModel![keyPath: keyPath] = newValue
-            }
-
+            get: { viewModel[keyPath: keyPath] },
+            set: { newValue in viewModel[keyPath: keyPath] = newValue }
         )
     }
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if let vm = viewModel {
-                    StreetPass_MainView()
-                        .environmentObject(vm)
-                        .fullScreenCover(isPresented: binding(\.isDrawingSheetPresented)) {
-                            DrawingEditorSheetView(
-                                isPresented: binding(\.isDrawingSheetPresented),
-                                cardDrawingData: binding(\.cardForEditor.drawingData)
-                            )
-                            .interactiveDismissDisabled()
-                        }
-                } else {
-                    ProgressView("Starting StreetPass…")
-                        .task {
-                            self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
-                        }
+            StreetPass_MainView()
+                .environmentObject(viewModel)
+                .fullScreenCover(isPresented: binding(\.isDrawingSheetPresented)) {
+                    DrawingEditorSheetView(
+                        isPresented: binding(\.isDrawingSheetPresented),
+                        cardDrawingData: binding(\.cardForEditor.drawingData)
+                    )
+                    .interactiveDismissDisabled()
                 }
-            }
         }
     }
 }
