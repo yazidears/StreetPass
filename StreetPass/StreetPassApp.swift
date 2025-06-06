@@ -209,6 +209,7 @@ struct StreetPassApp: App {
                             if self.viewModel == nil {
                                 self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
                             }
+
                         }
                 }
             }
