@@ -185,6 +185,7 @@ struct StreetPassApp: App {
                 guard let _ = viewModel else { return }
                 viewModel![keyPath: keyPath] = newValue
             }
+
         )
     }
 
