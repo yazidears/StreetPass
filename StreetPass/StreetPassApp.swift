@@ -203,8 +203,13 @@ struct StreetPassApp: App {
                         }
                 } else {
                     ProgressView("Starting StreetPass…")
-                        .task {
-                            self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
+                        .onAppear {
+                            // Defer view model creation until after the first frame
+                            // so Bluetooth prompts aren't blocked on launch
+                            if self.viewModel == nil {
+                                self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
+                            }
+
                         }
                 }
             }
