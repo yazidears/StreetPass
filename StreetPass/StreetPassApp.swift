@@ -210,6 +210,7 @@ struct StreetPassApp: App {
                             await MainActor.run {
                                 self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
                             }
+
                         }
                 }
             }
