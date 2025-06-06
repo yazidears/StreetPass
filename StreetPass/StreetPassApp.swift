@@ -164,7 +164,7 @@ struct StreetPassApp: App {
             print("StreetPassApp: Found existing UserID: \(existingID)")
             return existingID
         } else {
-            let newID = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+            let newID = UUID().uuidString
             userDefaults.set(newID, forKey: userIDKey)
             print("StreetPassApp: Generated new UserID: \(newID)")
             return newID
