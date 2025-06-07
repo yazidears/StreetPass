@@ -185,6 +185,7 @@ struct StreetPassApp: App {
                 viewModel = StreetPassViewModel(userID: StreetPassApp.getPersistentAppUserID())
             }
         }
+
     }
 
     @StateObject private var viewModelHolder = ViewModelHolder()
@@ -221,6 +222,7 @@ struct StreetPassApp: App {
                     ProgressView("Starting StreetPass…")
                         .task {
                             viewModelHolder.ensureViewModel()
+
                         }
                 }
             }
