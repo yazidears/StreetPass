@@ -1,8 +1,10 @@
-//StreetPass_BLEManager.swift:
+// StreetPass_BLEManager.swift
 import Foundation
 import CoreBluetooth
 import Combine
 
+// THIS IS THE FIRST FIX
+@MainActor
 protocol StreetPassBLEManagerDelegate: AnyObject {
     func bleManagerDidUpdateState(bluetoothState: CBManagerState)
     func bleManagerDidReceiveCard(_ card: EncounterCard, rssi: NSNumber?)
@@ -231,7 +233,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
     public func updateLocalUserCard(newCard: EncounterCard) {
         guard newCard.userID == self.localUserCard.userID else {
             log("Critical error: Attempt to update card with mismatched UserID. Current: \(self.localUserCard.userID), New: \(newCard.userID)", level: .error)
-            delegate?.bleManagerDidEncounterError(.internalInconsistency("UserID mismatch during card update."))
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.internalInconsistency("UserID mismatch during card update.")) }
             return
         }
         let contentActuallyChanged = self.localUserCard.isContentDifferent(from: newCard)
@@ -265,7 +267,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             } catch {
                 let errorMsg = "Encoding local card for characteristic update/notification failed: \(error.localizedDescription)"
                 log(errorMsg, level: .error)
-                delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg))
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
             }
         }
         objectWillChange.send()
@@ -431,7 +433,8 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             }
         } catch {
             let errorMsg = "Decoding local user card failed: \(error.localizedDescription). Using default and resaving."
-            log(errorMsg, level: .error); delegate?.bleManagerDidEncounterError(.dataDeserializationError(errorMsg))
+            log(errorMsg, level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError(errorMsg)) }
             self.localUserCard = EncounterCard(userID: self.localUserCard.userID) // // fallback to default
             saveLocalUserCardToPersistence()
         }
@@ -445,7 +448,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             log("Saved local user card ('\(localUserCard.displayName)', ID: \(String(localUserCard.id.uuidString.prefix(8)))) to UserDefaults. Size: \(cardData.count) bytes.")
         } catch {
             let errorMsg = "Encoding local user card for persistence failed: \(error.localizedDescription)"; log(errorMsg, level: .error)
-            delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg))
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
         }
     }
 
@@ -462,7 +465,8 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             for card in self.receivedCards { self.lastEncounterTimeByUser[card.userID] = card.lastUpdated }
         } catch {
             let errorMsg = "Decoding received cards failed: \(error.localizedDescription). Clearing cache."; log(errorMsg, level: .error)
-            delegate?.bleManagerDidEncounterError(.dataDeserializationError(errorMsg)); self.receivedCards = []
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError(errorMsg)) }
+            self.receivedCards = []
         }
         DispatchQueue.main.async { self.objectWillChange.send() }
     }
@@ -476,7 +480,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             log("Saved \(cardsToSave.count) received cards to UserDefaults. Size: \(receivedData.count) bytes.")
         } catch {
             let errorMsg = "Encoding received cards failed: \(error.localizedDescription)"; log(errorMsg, level: .error)
-            delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg))
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
         }
     }
     
@@ -532,7 +536,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             }
         } catch {
             let errorMsg = "Encoding local card for transmission failed: \(error.localizedDescription)"; log(errorMsg, level: .error)
-            delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg))
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
             currentChunkedWrite = nil // // clear op on error
         }
     }
@@ -562,14 +566,25 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
 
     // MARK: - CBCentralManagerDelegate
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        DispatchQueue.main.async { self.isBluetoothPoweredOn = (central.state == .poweredOn) }
-        delegate?.bleManagerDidUpdateState(bluetoothState: central.state)
+        DispatchQueue.main.async {
+            self.isBluetoothPoweredOn = (central.state == .poweredOn)
+            self.delegate?.bleManagerDidUpdateState(bluetoothState: central.state)
+        }
         switch central.state {
         case .poweredOn: log("Central Manager: Bluetooth ON."); startScanning()
-        case .poweredOff: log("Central Manager: Bluetooth OFF.", level: .warning); DispatchQueue.main.async { self.isScanning = false }; delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT Off (Central)"))
+        case .poweredOff:
+            log("Central Manager: Bluetooth OFF.", level: .warning)
+            DispatchQueue.main.async {
+                self.isScanning = false
+                self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT Off (Central)"))
+            }
             if let peer = connectingOrConnectedPeer { log("Central: BT off, cancel connect to \(String(peer.identifier.uuidString.prefix(8)))", level: .warning); centralManager.cancelPeripheralConnection(peer); connectingOrConnectedPeer = nil; currentChunkedWrite = nil }
-        case .unauthorized: log("Central Manager: BT unauthorized.", level: .error); delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT permissions not granted."))
-        case .unsupported: log("Central Manager: BT unsupported.", level: .error); delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT LE not supported."))
+        case .unauthorized:
+            log("Central Manager: BT unauthorized.", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT permissions not granted.")) }
+        case .unsupported:
+            log("Central Manager: BT unsupported.", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT LE not supported.")) }
         case .resetting: log("Central Manager: BT resetting.", level: .warning); if let peer = connectingOrConnectedPeer { centralManager.cancelPeripheralConnection(peer); connectingOrConnectedPeer = nil; currentChunkedWrite = nil }
         case .unknown: log("Central Manager: BT state unknown.", level: .warning)
         @unknown default: log("Central Manager: Unhandled BT state \(central.state.rawValue)", level: .warning)
@@ -609,14 +624,15 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         let errStr = error?.localizedDescription ?? "unknown reason"
         log("Central: Fail connect to '\(name)'. Error: \(errStr)", level: .error)
         if connectingOrConnectedPeer?.identifier == peripheral.identifier { connectingOrConnectedPeer = nil; currentChunkedWrite = nil } // // no longer busy with this one
-        delegate?.bleManagerDidEncounterError(.connectionFailed("Connect to '\(name)' fail: \(errStr)"))
+        DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.connectionFailed("Connect to '\(name)' fail: \(errStr)")) }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         let name = peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8))
         let peerID = peripheral.identifier
         if let err = error {
-            log("Central: Disconnected '\(name)' (ID: \(String(peerID.uuidString.prefix(8)))) error: \(err.localizedDescription)", level: .warning); delegate?.bleManagerDidEncounterError(.connectionFailed("Disconnect '\(name)': \(err.localizedDescription)"))
+            log("Central: Disconnected '\(name)' (ID: \(String(peerID.uuidString.prefix(8)))) error: \(err.localizedDescription)", level: .warning)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.connectionFailed("Disconnect '\(name)': \(err.localizedDescription)")) }
         } else { log("Central: Disconnected clean '\(name)' (ID: \(String(peerID.uuidString.prefix(8)))).") }
         
         // // Clean up resources associated with this peripheral
@@ -639,12 +655,14 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         if let err = error {
             log("Central/PeerDelegate: Error discovering services on '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))': \(err.localizedDescription)", level: .error)
             centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil; // let didDisconnect handle this
-            delegate?.bleManagerDidEncounterError(.serviceSetupFailed("Svc discovery peer fail: \(err.localizedDescription)")); return
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.serviceSetupFailed("Svc discovery peer fail: \(err.localizedDescription)")) }
+            return
         }
         guard let service = peripheral.services?.first(where: { $0.uuid == StreetPassBLE_UUIDs.streetPassServiceUUID }) else {
             log("Central/PeerDelegate: StreetPass service (\(StreetPassBLE_UUIDs.streetPassServiceUUID.uuidString)) NOT FOUND on '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))'. Disconnecting.", level: .warning)
             centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
-            delegate?.bleManagerDidEncounterError(.serviceSetupFailed("StreetPass svc not found peer.")); return
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.serviceSetupFailed("StreetPass svc not found peer.")) }
+            return
         }
         log("Central/PeerDelegate: Found StreetPass service on '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))'. Discovering EncounterCard char...")
         peripheral.discoverCharacteristics([StreetPassBLE_UUIDs.encounterCardCharacteristicUUID], for: service)
@@ -658,38 +676,34 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         if let err = error {
             log("Central/PeerDelegate: Error discovering chars for svc \(String(service.uuid.uuidString.prefix(8))) on '\(peripheral.name ?? "")': \(err.localizedDescription)", level: .error)
             centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
-            delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Char discovery fail: \(err.localizedDescription)")); return
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Char discovery fail: \(err.localizedDescription)")) }
+            return
         }
         guard let cardChar = service.characteristics?.first(where: { $0.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID }) else {
             log("Central/PeerDelegate: EncounterCard char (\(StreetPassBLE_UUIDs.encounterCardCharacteristicUUID.uuidString)) NOT FOUND in svc \(String(service.uuid.uuidString.prefix(8))). Disconnecting.", level: .warning)
             centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
-            delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("EncounterCard char not found peer.")); return
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("EncounterCard char not found peer.")) }
+            return
         }
         log("Central/PeerDelegate: Found EncounterCard characteristic. UUID: \(String(cardChar.uuid.uuidString.prefix(8))). Properties: \(cardChar.properties.description)")
         
-        // // Exchange logic: 1. Subscribe (if notify), 2. Read (if no notify but read), 3. Write our card
-        var readInitiated = false
+        // Exchange logic: 1. Subscribe (if notify), 2. Read (if no notify but read), 3. Write our card
         if cardChar.properties.contains(.notify) {
             log("Central/PeerDelegate: Char supports Notify. Subscribing...")
-            peripheral.setNotifyValue(true, for: cardChar) // // async, didUpdateNotificationStateFor will be called
-            // // We will attempt to write our card in didUpdateNotificationStateFor AFTER successful subscription
+            peripheral.setNotifyValue(true, for: cardChar)
         } else if cardChar.properties.contains(.read) {
             log("Central/PeerDelegate: Char no Notify, but supports Read. Reading...", level: .info)
-            peripheral.readValue(for: cardChar) // // async, didUpdateValueFor will be called
-            readInitiated = true
-            // // If we only read, we should send our card after their read completes or if read is quick.
-            // // For simplicity, let's assume if we read, we also try to write.
+            peripheral.readValue(for: cardChar)
             log("Central/PeerDelegate: Attempting to send our card after initiating read...")
             attemptCardTransmissionToPeer(peripheral: peripheral, characteristic: cardChar)
         } else {
             log("Central/PeerDelegate: EncounterCard char no Notify/Read. Cannot receive their card. Still attempting to send ours.", level: .warning)
-            // // We can still try to write our card if the characteristic is writable
             if cardChar.properties.contains(.write) || cardChar.properties.contains(.writeWithoutResponse) {
                 attemptCardTransmissionToPeer(peripheral: peripheral, characteristic: cardChar)
             } else {
                  log("Central/PeerDelegate: EncounterCard char also not writable. Full exchange impossible. Disconnecting.", level: .error)
                  centralManager.cancelPeripheralConnection(peripheral)
-                 delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Peer card char unusable (no read/notify/write)."));
+                 DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Peer card char unusable (no read/notify/write).")) }
             }
         }
     }
@@ -700,54 +714,44 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         if let err = error {
             log("Central/PeerDelegate: Error changing notify state CardData on \(String(describing: peripheral.name)): \(err.localizedDescription)", level: .error)
             centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
-            delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Subscribe peer card fail: \(err.localizedDescription)")); return
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Subscribe peer card fail: \(err.localizedDescription)")) }
+            return
         }
         if characteristic.isNotifying {
             log("Central/PeerDelegate: SUBSCRIBED to peer card notify (\(String(characteristic.uuid.uuidString.prefix(8)))).")
-            // // Now that we are subscribed (or if we only read), send our card.
-            // // If read was also initiated, this might be a second attempt, but currentChunkedWrite guard handles it.
             log("Central/PeerDelegate: Sending our card to peer after subscribe/simultaneously with read...")
             attemptCardTransmissionToPeer(peripheral: peripheral, characteristic: characteristic)
-            // // We wait for their notification in didUpdateValueFor
         } else {
-            // // Unsubscribed (e.g. if we called setNotifyValue(false, ...))
             log("Central/PeerDelegate: UNSUBSCRIBED from peer card notify (\(String(characteristic.uuid.uuidString.prefix(8)))).", level: .info)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        // // This is for writes .withResponse
-        if let activeWriteOp = currentChunkedWrite, // // Check if it's part of our chunked send
+        if let activeWriteOp = currentChunkedWrite,
            activeWriteOp.peripheralID == peripheral.identifier,
            activeWriteOp.characteristicID == characteristic.uuid {
             if let err = error {
                 log("Central/PeerDelegate: Error WRITING CHUNK to peer \(String(describing: peripheral.name)): \(err.localizedDescription)", level: .error)
-                delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Chunk write to peer fail: \(err.localizedDescription)"))
-                currentChunkedWrite = nil // // abort operation
-                // // possibly disconnect: centralManager.cancelPeripheralConnection(peripheral)
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Chunk write to peer fail: \(err.localizedDescription)")) }
+                currentChunkedWrite = nil
                 return
             }
             log("Central/PeerDelegate: Successfully WROTE CHUNK (offset now \(activeWriteOp.currentOffset)) to peer \(String(describing: peripheral.name)).")
-            // // Send the next chunk if any
-            sendNextChunk(peripheral: peripheral, characteristic: characteristic, writeType: .withResponse) // // chunked writes always use .withResponse
+            sendNextChunk(peripheral: peripheral, characteristic: characteristic, writeType: .withResponse)
         } else {
-            // // This was a single, non-chunked write with response
             guard peripheral.identifier == connectingOrConnectedPeer?.identifier && characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID else {
                 log("Central/PeerDelegate: Write resp for unexpected char/peripheral (not chunked). Char: \(String(characteristic.uuid.uuidString.prefix(8))) on \(String(peripheral.identifier.uuidString.prefix(8))). Ignored.", level: .warning); return
             }
             if let err = error {
                 log("Central/PeerDelegate: Error WRITING (single) our card to peer \(String(describing: peripheral.name)): \(err.localizedDescription)", level: .error)
-                delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Write local card to peer fail: \(err.localizedDescription)"));
-                // // possibly disconnect
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Write local card to peer fail: \(err.localizedDescription)")) }
             } else {
                 log("Central/PeerDelegate: Successfully WROTE (single) our card to peer \(String(describing: peripheral.name)).")
-                // // if this was the end of our sending, and we've received their card (or aren't expecting one), we might disconnect.
             }
         }
     }
     
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        // // This is called for both Reads and Notifications
         guard connectingOrConnectedPeer?.identifier == peripheral.identifier else {
             log("Central/PeerDelegate: Value update from unexpected peripheral \(String(peripheral.identifier.uuidString.prefix(8))). Ignored.", level: .warning); return }
         
@@ -756,9 +760,8 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         if characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID {
             if let err = error {
                 log("Central/PeerDelegate: Error char VALUE UPDATE \(String(characteristic.uuid.uuidString.prefix(8))): \(err.localizedDescription)", level: .error)
-                delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Receive value peer char fail: \(err.localizedDescription)"))
-                incomingDataBuffers[bufferKey] = nil; // // clear buffer on error
-                // centralManager.cancelPeripheralConnection(peripheral); // // possibly disconnect
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Receive value peer char fail: \(err.localizedDescription)")) }
+                incomingDataBuffers[bufferKey] = nil;
                 return
             }
             guard let newDataChunk = characteristic.value else {
@@ -771,52 +774,54 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             incomingDataBuffers[bufferKey] = currentBuffer
             log("Central/PeerDelegate: Accumulated buffer for \(String(bufferKey.peripheralID.uuidString.prefix(8))) is now \(currentBuffer.count) bytes.")
 
-            // // Attempt to decode. If it fails due to incomplete data, we wait for more chunks.
-            // // If it fails due to corruption, we abort.
             do {
                 let receivedCard = try jsonDecoder.decode(EncounterCard.self, from: currentBuffer)
-                // // DECODE SUCCESS!
                 log("Central/PeerDelegate: DECODED card from '\(receivedCard.displayName)'. Size: \(currentBuffer.count). Drawing: \(receivedCard.drawingData != nil).")
                 let rssi = peerRSSICache[peripheral.identifier]; processAndStoreReceivedCard(receivedCard, rssi: rssi)
-                incomingDataBuffers[bufferKey] = nil // // Clear buffer, full message received and processed
+                incomingDataBuffers[bufferKey] = nil
                 
-                // // Card exchange seems complete (we received theirs).
-                // // If we also finished sending ours (currentChunkedWrite is nil), then disconnect.
                 if currentChunkedWrite == nil {
                     log("Central/PeerDelegate: Card exchange complete (received theirs, already sent ours or not sending). Disconnecting '\(peripheral.name ?? "")'.")
-                    centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil; // Let didDisconnect handle state
+                    centralManager.cancelPeripheralConnection(peripheral);
                 } else {
                     log("Central/PeerDelegate: Received their card, but still sending ours. Waiting for our send to complete.")
                 }
 
             } catch let decodingError as DecodingError {
-                 // // Handle specific decoding errors to decide if it's incomplete data or actual corruption
                  switch decodingError {
                  case .dataCorrupted(let context):
-                     log("Central/PeerDelegate: Data CORRUPTED \(String(bufferKey.peripheralID.uuidString.prefix(8))). Buffer: \(currentBuffer.count). Context: \(context.debugDescription). Path: \(context.codingPath)", level: .error); log("Central/PeerDelegate: Snippet: \(String(data: currentBuffer.prefix(500), encoding: .utf8) ?? "Non-UTF8")"); delegate?.bleManagerDidEncounterError(.dataDeserializationError("Data corrupted: \(context.debugDescription)")); incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                     log("Central/PeerDelegate: Data CORRUPTED \(String(bufferKey.peripheralID.uuidString.prefix(8))). Buffer: \(currentBuffer.count). Context: \(context.debugDescription). Path: \(context.codingPath)", level: .error); log("Central/PeerDelegate: Snippet: \(String(data: currentBuffer.prefix(500), encoding: .utf8) ?? "Non-UTF8")")
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Data corrupted: \(context.debugDescription)")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
                  case .keyNotFound(let key, let context):
-                     log("Central/PeerDelegate: Key '\(key.stringValue)' NOT FOUND \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error); delegate?.bleManagerDidEncounterError(.dataDeserializationError("Missing key '\(key.stringValue)'.")); incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                     log("Central/PeerDelegate: Key '\(key.stringValue)' NOT FOUND \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Missing key '\(key.stringValue)'.")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
                  case .typeMismatch(let type, let context):
-                     log("Central/PeerDelegate: Type MISMATCH '\(context.codingPath.last?.stringValue ?? "uk")' (exp \(type)) \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error); delegate?.bleManagerDidEncounterError(.dataDeserializationError("Type mismatch key '\(context.codingPath.last?.stringValue ?? "")': \(context.debugDescription).")); incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                     log("Central/PeerDelegate: Type MISMATCH '\(context.codingPath.last?.stringValue ?? "uk")' (exp \(type)) \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Type mismatch key '\(context.codingPath.last?.stringValue ?? "")': \(context.debugDescription).")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
                  case .valueNotFound(let type, let context):
-                     log("Central/PeerDelegate: Value NOT FOUND type \(type) key '\(context.codingPath.last?.stringValue ?? "uk")' \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error); delegate?.bleManagerDidEncounterError(.dataDeserializationError("Value not found key '\(context.codingPath.last?.stringValue ?? "")': \(context.debugDescription).")); incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                     log("Central/PeerDelegate: Value NOT FOUND type \(type) key '\(context.codingPath.last?.stringValue ?? "uk")' \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Value not found key '\(context.codingPath.last?.stringValue ?? "")': \(context.debugDescription).")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
                  @unknown default:
-                     log("Central/PeerDelegate: Unknown decode error \(String(bufferKey.peripheralID.uuidString.prefix(8))). Error: \(decodingError.localizedDescription)", level: .error); delegate?.bleManagerDidEncounterError(.dataDeserializationError("Unknown decode error: \(decodingError.localizedDescription)")); incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                     log("Central/PeerDelegate: Unknown decode error \(String(bufferKey.peripheralID.uuidString.prefix(8))). Error: \(decodingError.localizedDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Unknown decode error: \(decodingError.localizedDescription)")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
                  }
-                 // // if it was a "fatal" decoding error (like corruption), buffer is cleared and we disconnect.
-                 // // if it was something that *might* be due to incomplete JSON (e.g. if JSONDecoder throws a generic swift error for unexpected end), we might wait.
-                 // // however, jsonDecoder often throws dataCorrupted for incomplete JSON too.
-                 // // The original logic to check buffer size and assume incomplete might still be okay
-                 if case .dataCorrupted = decodingError { /* Already handled by logging and disconnect */ }
-                 else if currentBuffer.count < 65535 { // // arbitrary limit for "too much and still failing"
+                 if case .dataCorrupted = decodingError { /* Handled */ }
+                 else if currentBuffer.count < 65535 {
                      log("Central/PeerDelegate: Decode fail (not dataCorrupted but specific like key/type/value not found), assume incomplete or malformed. Buffer: \(currentBuffer.count). Waiting more data for \(String(bufferKey.peripheralID.uuidString.prefix(8))). This might be an issue if the sender is sending bad data.", level: .warning)
-                     // // if it's a structural error (keynotfound, typemismatch), more data won't help unless it's a completely new message.
-                     // // for now, we'll keep buffer and hope next chunk is part of a *new* attempt or fixes it, but usually these are fatal for current message.
                  } else {
-                     log("Central/PeerDelegate: Buffer too large (\(currentBuffer.count)) and still fail decode with non-corrupt error. Giving up \(String(bufferKey.peripheralID.uuidString.prefix(8))).", level: .error); delegate?.bleManagerDidEncounterError(.dataDeserializationError("Buffer limit exceeded decoding.")); incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                     log("Central/PeerDelegate: Buffer too large (\(currentBuffer.count)) and still fail decode with non-corrupt error. Giving up \(String(bufferKey.peripheralID.uuidString.prefix(8))).", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Buffer limit exceeded decoding.")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
                  }
-            } catch { // // other errors
-                log("Central/PeerDelegate: GENERIC UNEXPECTED DECODE ERROR \(String(bufferKey.peripheralID.uuidString.prefix(8))). Buffer: \(currentBuffer.count). Error: \(error.localizedDescription)", level: .error); delegate?.bleManagerDidEncounterError(.dataDeserializationError("Generic error decode peer card: \(error.localizedDescription)")); incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+            } catch {
+                log("Central/PeerDelegate: GENERIC UNEXPECTED DECODE ERROR \(String(bufferKey.peripheralID.uuidString.prefix(8))). Buffer: \(currentBuffer.count). Error: \(error.localizedDescription)", level: .error)
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Generic error decode peer card: \(error.localizedDescription)")) }
+                incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
             }
         } else {
             log("Central/PeerDelegate: Updated value for unexpected characteristic: \(String(characteristic.uuid.uuidString.prefix(8))) from \(String(peripheral.identifier.uuidString.prefix(8)))")
@@ -832,33 +837,51 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
 
     // MARK: - CBPeripheralManagerDelegate
     func peripheralManagerDidUpdateState(_ manager: CBPeripheralManager) {
-        delegate?.bleManagerDidUpdateState(bluetoothState: manager.state)
+        DispatchQueue.main.async { self.delegate?.bleManagerDidUpdateState(bluetoothState: manager.state) }
         switch manager.state {
         case .poweredOn: log("Peripheral Manager: Bluetooth ON."); setupServiceAndStartAdvertising()
-        case .poweredOff: log("Peripheral Manager: Bluetooth OFF.", level: .warning); DispatchQueue.main.async { self.isAdvertising = false }; delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT Off (Peripheral)")); ongoingNotificationSends.removeAll()
-        case .unauthorized: log("Peripheral Manager: BT unauthorized.", level: .error); delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT permissions not granted peripheral."))
-        case .resetting: log("Peripheral Manager: BT resetting.", level: .warning); ongoingNotificationSends.removeAll()
+        case .poweredOff:
+            log("Peripheral Manager: Bluetooth OFF.", level: .warning)
+            DispatchQueue.main.async {
+                self.isAdvertising = false
+                self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT Off (Peripheral)"))
+            }
+            ongoingNotificationSends.removeAll()
+        case .unauthorized:
+            log("Peripheral Manager: BT unauthorized.", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT permissions not granted peripheral.")) }
+        case .resetting:
+            log("Peripheral Manager: BT resetting.", level: .warning)
+            ongoingNotificationSends.removeAll()
         default: log("Peripheral Manager: State changed to \(manager.state.rawValue)", level: .info)
         }
     }
 
     func peripheralManager(_ manager: CBPeripheralManager, didAdd service: CBService, error: Error?) {
         if let err = error {
-            log("Peripheral/MgrDelegate: Error adding service \(String(service.uuid.uuidString.prefix(8))): \(err.localizedDescription)", level: .error); delegate?.bleManagerDidEncounterError(.serviceSetupFailed("Fail add BLE svc: \(err.localizedDescription)")); return }
+            log("Peripheral/MgrDelegate: Error adding service \(String(service.uuid.uuidString.prefix(8))): \(err.localizedDescription)", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.serviceSetupFailed("Fail add BLE svc: \(err.localizedDescription)")) }
+            return
+        }
         log("Peripheral/MgrDelegate: Service \(String(service.uuid.uuidString.prefix(8))) added. Attempting start advertising...")
-        actuallyStartAdvertising() // // now we can advertise it
+        actuallyStartAdvertising()
     }
 
     func peripheralManagerDidStartAdvertising(_ manager: CBPeripheralManager, error: Error?) {
         if let err = error {
-            log("Peripheral/MgrDelegate: Fail start advertising: \(err.localizedDescription)", level: .error); DispatchQueue.main.async { self.isAdvertising = false }; delegate?.bleManagerDidEncounterError(.advertisingFailed("Fail start advertising: \(err.localizedDescription)")); return }
+            log("Peripheral/MgrDelegate: Fail start advertising: \(err.localizedDescription)", level: .error)
+            DispatchQueue.main.async {
+                self.isAdvertising = false
+                self.delegate?.bleManagerDidEncounterError(.advertisingFailed("Fail start advertising: \(err.localizedDescription)"))
+            }
+            return
+        }
         log("Peripheral/MgrDelegate: STARTED ADVERTISING StreetPass service.")
         DispatchQueue.main.async { self.isAdvertising = true }
-        // // Set initial characteristic value (for reads)
         if let char = self.encounterCardMutableCharacteristic {
             do {
                 let cardData = try jsonEncoder.encode(self.localUserCard)
-                char.value = cardData // // iOS handles chunking for direct characteristic value reads by centrals
+                char.value = cardData
                 log("Peripheral/MgrDelegate: Set initial char value on ad start. Size: \(cardData.count).")
             }
             catch { log("Peripheral/MgrDelegate: Error encode card for initial char value: \(error.localizedDescription)", level: .error) }
@@ -874,31 +897,22 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             manager.respond(to: request, withResult: .attributeNotFound); return
         }
         
-        // // The characteristic's value should already be set by updateLocalUserCard or on advertising start.
-        // // CoreBluetooth handles responding to read requests with offsets from characteristic.value automatically if it's not too large.
-        // // If characteristic.value is large, this method is called for manual handling.
         do {
-            var cardToSend = self.localUserCard; cardToSend.lastUpdated = Date() // // fresh timestamp
+            var cardToSend = self.localUserCard; cardToSend.lastUpdated = Date()
             let fullCardData = try jsonEncoder.encode(cardToSend)
             log("Peripheral/MgrDelegate: Total card data size for read: \(fullCardData.count) bytes for Central \(centralIDPart).")
 
-            if request.offset >= fullCardData.count { // // offset can be equal to count for 0 byte read
-                log("Peripheral/MgrDelegate: Read offset (\(request.offset)) >= data length (\(fullCardData.count)). Respond 'InvalidOffset' or success with empty data.", level: .warning)
-                 // // if offset == fullCardData.count, it means central wants to read from end, respond with empty data and success
-                 // // if offset > fullCardData.count, it's an invalid offset
+            if request.offset >= fullCardData.count {
                 if request.offset > fullCardData.count {
                     manager.respond(to: request, withResult: .invalidOffset); return
                 }
-                 // else, offset == fullCardData.count, send empty data
             }
             
-            // // Use helper from Data extension to get the subdata safely
             if let chunkToSend = fullCardData.subdataIfAppropriate(offset: request.offset, maxLength: request.central.maximumUpdateValueLength) {
                  request.value = chunkToSend
                  log("Peripheral/MgrDelegate: Responding Central \(centralIDPart) with \(chunkToSend.count) bytes (offset \(request.offset)). Success.")
                  manager.respond(to: request, withResult: .success)
             } else {
-                // // subdataIfAppropriate logged the error. This case means offset was bad or maxLength was 0.
                 log("Peripheral/MgrDelegate: Subdata generation failed for read request. Offset: \(request.offset), MaxLength: \(request.central.maximumUpdateValueLength). Responding InvalidOffset.", level: .error)
                 manager.respond(to: request, withResult: .invalidOffset)
             }
@@ -906,7 +920,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         } catch {
             log("Peripheral/MgrDelegate: Error encoding local card for read response: \(error.localizedDescription)", level: .error)
             manager.respond(to: request, withResult: .unlikelyError)
-            delegate?.bleManagerDidEncounterError(.dataSerializationError("Encode card read response fail: \(error.localizedDescription)"))
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError("Encode card read response fail: \(error.localizedDescription)")) }
         }
     }
 
@@ -920,57 +934,39 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
                 log("Peripheral/MgrDelegate: Write UNKNOWN char from \(centralIDPart). Respond 'AttributeNotFound'.", level: .warning)
                 manager.respond(to: request, withResult: .attributeNotFound); continue
             }
-            guard let dataChunk = request.value else { // // data can be empty for some writes, but not for ours
+            guard let dataChunk = request.value else {
                 log("Peripheral/MgrDelegate: Write EMPTY data from \(centralIDPart). Respond 'InvalidAttributeValueLength'.", level: .warning)
                 manager.respond(to: request, withResult: .invalidAttributeValueLength); continue
             }
 
-            // // NEW: Accumulate chunks for writes
             var currentBuffer = incomingWriteBuffers[centralID, default: Data()]
             
-            // // If offset is 0, it's a new transmission or overwrite, clear old buffer
-            // // CBATTRequest offset is for the current chunk relative to the *characteristic's value*, not necessarily start of our logical message.
-            // // Simpler: assume sequential writes for a logical message. If a central starts a new write sequence (e.g. its own chunking logic implies this),
-            // // our buffer will grow. We rely on the central sending all its chunks for one card.
-            // // The central's currentChunkedWrite ensures it sends one full card.
-            if request.offset == 0 && !currentBuffer.isEmpty && dataChunk.count < currentBuffer.count { // // crude check for new message start
+            if request.offset == 0 && !currentBuffer.isEmpty && dataChunk.count < currentBuffer.count {
                 log("Peripheral/MgrDelegate: Write request offset 0, assuming new message from \(centralIDPart), clearing previous buffer (\(currentBuffer.count) bytes).", level: .info)
                 currentBuffer = Data()
             }
-            // // A better way: If the central's ChunkedWriteOperation uses offset, the CBATTRequest.offset might reflect that.
-            // // For now, just append. Our central sends chunks sequentially without explicit offset in writeValue.
             currentBuffer.append(dataChunk)
             incomingWriteBuffers[centralID] = currentBuffer
             log("Peripheral/MgrDelegate: Accumulated write buffer for \(centralIDPart) is now \(currentBuffer.count) bytes.")
 
             do {
                 let receivedCard = try jsonDecoder.decode(EncounterCard.self, from: currentBuffer)
-                // // DECODE SUCCESS!
                 log("Peripheral/MgrDelegate: DECODED card from '\(receivedCard.displayName)' (Central \(centralIDPart)) via write. Processing...", level: .info)
-                processAndStoreReceivedCard(receivedCard, rssi: nil) // // RSSI unknown for writes
-                incomingWriteBuffers[centralID] = nil // // Clear buffer for this central, message processed
+                processAndStoreReceivedCard(receivedCard, rssi: nil)
+                incomingWriteBuffers[centralID] = nil
                 manager.respond(to: request, withResult: .success)
             } catch let decodingError as DecodingError {
-                // // If decode fails, it might be an incomplete message. Acknowledge chunk.
                 log("Peripheral/MgrDelegate: DECODING card from Central \(centralIDPart) (write) FAILED (possibly incomplete): \(decodingError.localizedDescription). Current buffer size: \(currentBuffer.count)", level: .info)
-                // log("Peripheral/MgrDelegate: Data Snippet: \(String(data: currentBuffer.prefix(500), encoding: .utf8) ?? "Non-UTF8 data")")
-                
-                // // Respond success to acknowledge the chunk, central will send next or this was last and corrupt
                 manager.respond(to: request, withResult: .success)
-                // // Don't clear buffer yet, wait for more chunks. If it was indeed corrupt, next write might start fresh or fail again.
-                // // If this was the *last* chunk from central and it's still not decodable, buffer will remain until central disconnects or new write starts.
-                // // This could be improved with explicit EOM from central.
                 if case .dataCorrupted = decodingError {
                     log("peripheral/mgrdelegate: write data corrupted from \(centralIDPart). buffer not cleared yet, waiting for more or disconnect.", level: .error)
-                    // delegate?.bleManagerDidEncounterError(.dataDeserializationError("corrupt write data from \(centralidpart)"))
-                    // incomingWriteBuffers[centralID] = nil // // if truly corrupt, clear it. but how to be sure?
                 }
 
-            } catch { // // other errors
+            } catch {
                 log("Peripheral/MgrDelegate: GENERIC UNEXPECTED DECODE ERROR from Central \(centralIDPart) (write): \(error.localizedDescription). Size: \(currentBuffer.count)", level: .error)
-                manager.respond(to: request, withResult: .unlikelyError) // // more serious error
-                incomingWriteBuffers[centralID] = nil // // clear buffer on unlikely error
-                delegate?.bleManagerDidEncounterError(.dataDeserializationError("Decode peer card write (Central \(centralIDPart)) fail: \(error.localizedDescription)"))
+                manager.respond(to: request, withResult: .unlikelyError)
+                incomingWriteBuffers[centralID] = nil
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Decode peer card write (Central \(centralIDPart)) fail: \(error.localizedDescription)")) }
             }
         }
     }
@@ -986,7 +982,6 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
             log("Peripheral/MgrDelegate: Added Central \(centralIDPart) to subscribed list. Count: \(subscribedCentrals.count).")
         }
         
-        // // Send current card to new subscriber (chunked)
         do {
             var cardToSend = self.localUserCard; cardToSend.lastUpdated = Date()
             let cardData = try jsonEncoder.encode(cardToSend)
@@ -1010,15 +1005,13 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         log("Peripheral/MgrDelegate: Central \(centralIDPart) UNSUBSCRIBED from EncounterCard char.")
         subscribedCentrals.removeAll { $0.identifier == central.identifier }
         log("Peripheral/MgrDelegate: Removed Central \(centralIDPart) from subscribed list. Count: \(subscribedCentrals.count).")
-        ongoingNotificationSends.removeValue(forKey: central.identifier) // // cancel any pending sends to this central
-        incomingWriteBuffers.removeValue(forKey: central.identifier) // // also clear any pending write data from this central
+        ongoingNotificationSends.removeValue(forKey: central.identifier)
+        incomingWriteBuffers.removeValue(forKey: central.identifier)
     }
     
     func peripheralManagerIsReady(toUpdateSubscribers manager: CBPeripheralManager) {
         log("Peripheral/MgrDelegate: Peripheral manager ready to update subscribers again.")
-        // // This is the green light to continue sending chunks if `updateValue` previously returned false.
-        for centralID in ongoingNotificationSends.keys { // // check all ongoing operations
-             // // Check if the operation for this central was waiting (e.g., by a flag in the operation struct, or just try sending next)
+        for centralID in ongoingNotificationSends.keys {
              log("peripheral/mgrdelegate: isreadytoupdatesubscribers - retrying send for central \(String(centralID.uuidString.prefix(8)))")
              attemptToSendNextNotificationChunk(for: centralID)
         }
@@ -1029,18 +1022,15 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
 extension Data {
     func subdataIfAppropriate(offset: Int, maxLength: Int) -> Data? {
         guard offset >= 0 else { log_ble_data_helper("Invalid offset: \(offset)."); return nil }
-        // maxLength can be 0 if central is probing, but we should probably send empty data then.
-        // For our purpose, if maxLength is 0, we probably shouldn't send.
-        // However, central.maximumUpdateValueLength should always be > 0.
-        guard maxLength > 0 else { log_ble_data_helper("Invalid maxLength: \(maxLength). Usually means central is not ready or MTU is tiny."); return nil } // return nil if maxlen is 0
+        guard maxLength > 0 else { log_ble_data_helper("Invalid maxLength: \(maxLength). Usually means central is not ready or MTU is tiny."); return nil }
         
         if offset > self.count {
             log_ble_data_helper("Offset \(offset) > data length \(self.count). Responding InvalidOffset (nil from here).")
-            return nil // // clearly invalid offset for non-empty data
+            return nil
         }
         if offset == self.count {
             log_ble_data_helper("Offset \(offset) == data length \(self.count). Returning empty Data for end-of-data read.")
-            return Data() // // valid read at end of data, returns empty
+            return Data()
         }
         
         let availableLength = self.count - offset
@@ -1055,24 +1045,23 @@ extension Data {
 
 // MARK: - CBCharacteristicProperties Extension
 extension CBCharacteristicProperties {
-    var description: String { // // useful for debugging
+    var description: String {
         var descriptions: [String] = []
         if contains(.broadcast) { descriptions.append("broadcast") }
         if contains(.read) { descriptions.append("read") }
-        if contains(.writeWithoutResponse) { descriptions.append("writeNoResp") } // shorter
+        if contains(.writeWithoutResponse) { descriptions.append("writeNoResp") }
         if contains(.write) { descriptions.append("write") }
         if contains(.notify) { descriptions.append("notify") }
         if contains(.indicate) { descriptions.append("indicate") }
-        if contains(.authenticatedSignedWrites) { descriptions.append("authSignedWrites") } // shorter
-        if contains(.extendedProperties) { descriptions.append("extProps") } // shorter
-        if contains(.notifyEncryptionRequired) { descriptions.append("notifyEncReq") } // shorter
-        if contains(.indicateEncryptionRequired) { descriptions.append("indicateEncReq") } // shorter
+        if contains(.authenticatedSignedWrites) { descriptions.append("authSignedWrites") }
+        if contains(.extendedProperties) { descriptions.append("extProps") }
+        if contains(.notifyEncryptionRequired) { descriptions.append("notifyEncReq") }
+        if contains(.indicateEncryptionRequired) { descriptions.append("indicateEncReq") }
         if descriptions.isEmpty { return "none" }
         return descriptions.joined(separator: ", ")
     }
 }
 
 fileprivate func log_ble_data_helper(_ message: String) {
-    // // this is a global func, kinda pollutes namespace but ok for fileprivate
-    print("streetpassble/datahelper: \(message)") // lowercase
+    print("streetpassble/datahelper: \(message)")
 }

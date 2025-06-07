@@ -1,3 +1,6 @@
+// StreetPass_MainView.swift
+// this is the main screen, the whole damn thing.
+
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -209,6 +212,8 @@ struct StreetPass_MainView: View {
 
 
     var body: some View {
+        // this view doesn't decide what to show anymore. it just shows itself.
+        // the logic is now up in StreetPassApp.swift, where it belongs.
         let allCards = viewModel.recentlyEncounteredCards
         let lowercasedSearchText = searchText.trimming.lowercased()
         let filteredCards: [EncounterCard] = {
@@ -238,7 +243,7 @@ struct StreetPass_MainView: View {
                     Text("This will erase all data and restart StreetPass.")
                 }
                 .onAppear {
-                    timeBasedGreeting = getTimeBasedGreetingLogic() // Refresh on appear
+                    timeBasedGreeting = getTimeBasedGreetingLogic()
                     withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
                         showHeaderAvatar = true
                     }
@@ -369,7 +374,7 @@ struct StreetPass_MainView: View {
                 .offset(y: scrollOffset > 0 ? -scrollOffset * (parallaxFactor * 0.8) : 0)
             }
         }
-        .frame(minHeight: headerHeight) // Use minHeight to allow expansion if greeting is long
+        .frame(minHeight: headerHeight)
     }
 
     @ViewBuilder
