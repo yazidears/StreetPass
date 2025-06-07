@@ -171,19 +171,35 @@ struct StreetPassApp: App {
         }
     }
 
-    @State private var viewModel: StreetPassViewModel? = nil
+    /// Holder class lets us lazily create the actual view model while still
+    /// using `@StateObject` so the reference survives view reloads. Without
+    /// this the progress view could reappear on first launch when the view is
+    /// recreated before the async init finishes.
+    @MainActor
+    private final class ViewModelHolder: ObservableObject {
+        @Published var viewModel: StreetPassViewModel? = nil
+
+        func ensureViewModel() {
+            guard viewModel == nil else { return }
+            Task { @MainActor in
+                viewModel = StreetPassViewModel(userID: StreetPassApp.getPersistentAppUserID())
+            }
+        }
+    }
+
+    @StateObject private var viewModelHolder = ViewModelHolder()
 
     private func binding<T>(_ keyPath: ReferenceWritableKeyPath<StreetPassViewModel, T>) -> Binding<T> {
         Binding(
             get: {
-                guard let vm = viewModel else {
+                guard let vm = viewModelHolder.viewModel else {
                     fatalError("StreetPassViewModel not initialized before binding access")
                 }
                 return vm[keyPath: keyPath]
             },
             set: { newValue in
-                guard let _ = viewModel else { return }
-                viewModel![keyPath: keyPath] = newValue
+                guard let _ = viewModelHolder.viewModel else { return }
+                viewModelHolder.viewModel![keyPath: keyPath] = newValue
             }
         )
     }
@@ -191,7 +207,7 @@ struct StreetPassApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if let vm = viewModel {
+                if let vm = viewModelHolder.viewModel {
                     StreetPass_MainView()
                         .environmentObject(vm)
                         .fullScreenCover(isPresented: binding(\.isDrawingSheetPresented)) {
@@ -203,14 +219,8 @@ struct StreetPassApp: App {
                         }
                 } else {
                     ProgressView("Starting StreetPass…")
-                        .onAppear {
-                            // Defer view model creation until after the first frame
-                            // so Bluetooth prompts aren't blocked on launch
-                            guard viewModel == nil else { return }
-                            DispatchQueue.main.async {
-                                self.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
-                            }
-
+                        .task {
+                            viewModelHolder.ensureViewModel()
                         }
                 }
             }

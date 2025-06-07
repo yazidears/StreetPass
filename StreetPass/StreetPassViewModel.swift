@@ -5,6 +5,7 @@ import CoreBluetooth
 import Combine
 import UIKit
 
+@MainActor
 class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
 
     @Published private(set) var bleManager: StreetPassBLEManager
