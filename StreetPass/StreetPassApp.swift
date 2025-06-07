@@ -175,8 +175,17 @@ struct StreetPassApp: App {
     /// using `@StateObject` so the reference survives view reloads. Without
     /// this the progress view could reappear on first launch when the view is
     /// recreated before the async init finishes.
+    @MainActor
     private final class ViewModelHolder: ObservableObject {
         @Published var viewModel: StreetPassViewModel? = nil
+
+        func ensureViewModel() {
+            guard viewModel == nil else { return }
+            Task { @MainActor in
+                viewModel = StreetPassViewModel(userID: StreetPassApp.getPersistentAppUserID())
+            }
+        }
+
     }
 
     @StateObject private var viewModelHolder = ViewModelHolder()
@@ -211,13 +220,8 @@ struct StreetPassApp: App {
                         }
                 } else {
                     ProgressView("Starting StreetPass…")
-                        .onAppear {
-                            // Defer view model creation until after the first frame
-                            // so Bluetooth prompts aren't blocked on launch
-                            guard viewModelHolder.viewModel == nil else { return }
-                            DispatchQueue.main.async {
-                                viewModelHolder.viewModel = StreetPassViewModel(userID: Self.getPersistentAppUserID())
-                            }
+                        .task {
+                            viewModelHolder.ensureViewModel()
 
                         }
                 }
