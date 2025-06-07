@@ -10,27 +10,21 @@ import UIKit // for uiimage stuff, boring but necessary
 struct EncounterCard: Identifiable, Codable, Equatable {
     var id: UUID
     let userID: String
-
     var displayName: String
     var statusMessage: String
     var avatarSymbolName: String
-
     var flairField1Title: String?
     var flairField1Value: String?
     var flairField2Title: String?
     var flairField2Value: String?
-
     var drawingData: Data?
-
     var lastUpdated: Date
     var cardSchemaVersion: Int = 1
-
     init(userID: String,
          displayName: String = "StreetPass User",
          statusMessage: String = "Ready for new encounters!",
          avatarSymbolName: String = "person.crop.circle.fill",
          drawingData: Data? = nil) {
-
         self.id = UUID()
         self.userID = userID
         self.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,21 +32,18 @@ struct EncounterCard: Identifiable, Codable, Equatable {
         self.avatarSymbolName = avatarSymbolName
         self.drawingData = drawingData
         self.lastUpdated = Date()
-        self.cardSchemaVersion = 2 // bumped the schema, we're so professional
+        self.cardSchemaVersion = 2
     }
-
     var drawingImage: UIImage? {
         guard let data = drawingData else { return nil }
         return UIImage(data: data)
     }
-
     static func == (lhs: EncounterCard, rhs: EncounterCard) -> Bool {
         return lhs.id == rhs.id &&
                lhs.userID == rhs.userID &&
                lhs.lastUpdated == rhs.lastUpdated &&
                lhs.drawingData == rhs.drawingData
     }
-
     func isContentDifferent(from other: EncounterCard) -> Bool {
          return self.displayName != other.displayName ||
                 self.statusMessage != other.statusMessage ||
@@ -64,14 +55,12 @@ struct EncounterCard: Identifiable, Codable, Equatable {
                 self.drawingData != other.drawingData ||
                 self.cardSchemaVersion != other.cardSchemaVersion
     }
-
     static func placeholderCard(drawingIdentifier: String) -> EncounterCard {
         var card = EncounterCard(userID: UUID().uuidString, displayName: "---")
         card.avatarSymbolName = drawingIdentifier
         card.drawingData = nil
         return card
     }
-
     @ViewBuilder
     func getPlaceholderDrawingView(strokeColor: Color = .black, lineWidth: CGFloat = 3) -> some View {
         switch self.avatarSymbolName {
@@ -143,11 +132,11 @@ struct StreetPassApp: App {
         }
     }
 
-    // the viewmodel gets created here, and all its data is loaded instantly. it's ready.
+    // The viewmodel's init is now safe and fast.
     @StateObject private var viewModel = StreetPassViewModel(userID: StreetPassApp.getPersistentAppUserID())
     
-    // okay, moment of truth. this is the switch that runs the whole show.
-    @State private var showMainView = false
+    // The switch that controls the UI.
+    @State private var isAppReady = false
 
     private func binding<T>(_ keyPath: ReferenceWritableKeyPath<StreetPassViewModel, T>) -> Binding<T> {
         Binding(
@@ -159,8 +148,8 @@ struct StreetPassApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if showMainView {
-                    // this is the grown-up table. show the real app.
+                if isAppReady {
+                    // Show the real app
                     StreetPass_MainView()
                         .environmentObject(viewModel)
                         .fullScreenCover(isPresented: binding(\.isDrawingSheetPresented)) {
@@ -171,12 +160,15 @@ struct StreetPassApp: App {
                             .interactiveDismissDisabled()
                         }
                 } else {
-                    // still warming up. show the pretty spinner.
-                    ProgressView("Starting StreetPass…")
-                        .onReceive(viewModel.initializationComplete) { _ in
-                            // we got the flare. flip the switch.
-                            self.showMainView = true
-                        }
+                    // Use our new, safe LoadingView.
+                    // We give it the viewmodel and we give it the "password" (the onFinished closure)
+                    // so it can tell us when it's done setting up.
+                    LoadingView(viewModel: viewModel) {
+                        // this closure gets called when loadingview is done.
+                        // now we can safely flip the switch.
+                        print("streetpassapp: loadingview finished, gonna set isappready = true now, fingers crossed ✨") // <-- like, right here
+                        self.isAppReady = true
+                    }
                 }
             }
         }

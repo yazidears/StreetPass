@@ -3,17 +3,15 @@
 
 import SwiftUI
 import CoreBluetooth
-import Combine // <<-- aight, we need this for the new signal
+import Combine
 import UIKit
 
 @MainActor
 class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
 
-    // HERE'S THE NEW SHIT: A direct signal to the UI to tell it to wake the fuck up.
-    let initializationComplete = PassthroughSubject<Void, Never>()
-
-    // the manager for all that bluetooth voodoo
-    @Published var bleManager: StreetPassBLEManager
+    // the manager is now an optional, because we're creating it *after* init.
+    // this is the key to the whole damn thing.
+    @Published var bleManager: StreetPassBLEManager!
     private var bleManagerCancellable: AnyCancellable?
     
     // state for all the different UI parts
@@ -24,42 +22,61 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
     @Published var isDrawingSheetPresented: Bool = false
     
     // quick shortcuts for the views to grab data
-    var myCurrentCard: EncounterCard { bleManager.localUserCard }
-    var recentlyEncounteredCards: [EncounterCard] { bleManager.receivedCards.sorted(by: { $0.lastUpdated > $1.lastUpdated }) }
-    var bleActivityLog: [String] { bleManager.activityLog }
-    var isBluetoothOn: Bool { bleManager.isBluetoothPoweredOn }
-    var isScanningActive: Bool { bleManager.isScanning }
-    var isAdvertisingActive: Bool { bleManager.isAdvertising }
+    // we have to check if the manager exists, otherwise... boom.
+    var myCurrentCard: EncounterCard { bleManager?.localUserCard ?? EncounterCard(userID: self.userID) }
+    var recentlyEncounteredCards: [EncounterCard] { bleManager?.receivedCards.sorted(by: { $0.lastUpdated > $1.lastUpdated }) ?? [] }
+    var bleActivityLog: [String] { bleManager?.activityLog ?? [] }
+    var isBluetoothOn: Bool { bleManager?.isBluetoothPoweredOn ?? false }
+    var isScanningActive: Bool { bleManager?.isScanning ?? false }
+    var isAdvertisingActive: Bool { bleManager?.isAdvertising ?? false }
 
     // more state for the pretty UI
     @Published var greetingName: String = "david"
     @Published var newCardsCountForBanner: Int = 0
+    
+    private let userID: String
 
     init(userID: String) {
-        // aight, let's load all our shit up front. no waiting.
-        let initialBLEManager = StreetPassBLEManager(userID: userID)
-        self.bleManager = initialBLEManager
+        // the init is now DUMB. it does nothing but set a default value.
+        // no bluetooth, no file loading, no deadlocks.
+        self.userID = userID
         self.cardForEditor = EncounterCard(userID: userID)
+        print("ViewModel created, but it's just chilling for now. No bluetooth code has been touched.")
+    }
+
+    // THIS IS OUR NEW HERO. WE CALL THIS *AFTER* THE LOADING SCREEN IS VISIBLE.
+    func setup() async {
+        // if we already set up, don't do it again.
+        guard self.bleManager == nil else { return }
         
-        // tell the ble manager that *we* are the one to gossip to
+        logViewModel("Ok, for real this time. The UI is stable. Activating the ViewModel and creating BLE Manager.")
+        
+        let initialBLEManager = StreetPassBLEManager(userID: self.userID)
+        self.bleManager = initialBLEManager
+        
         self.bleManager.delegate = self
         bindBLEManager()
         
-        // this actually loads the user's saved card from disk
         self.bleManager.loadLocalUserCardFromPersistence()
         
-        // and now we sync up all our properties with the data we just loaded
+        // now that we have real data, update the published properties
         self.cardForEditor = self.bleManager.localUserCard
         self.greetingName = self.bleManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
         self.newCardsCountForBanner = self.bleManager.receivedCards.count
-        logViewModel("Initialized with UserID: \(userID). Editor card set from loaded/default local card.")
         
-        // OKAY, EVERYTHING IS DONE. SEND THE FLARE.
-        initializationComplete.send()
+        // a little delay just to be safe and let any queued UI events settle.
+        try? await Task.sleep(nanoseconds: 1_000_000) // 1 millisecond
+        
+        logViewModel("Activation complete. All systems are go.")
     }
 
     private func logViewModel(_ message: String) {
-        bleManager.log("ViewModel: \(message)")
+        // gotta check if the manager exists before we try to use it for logging
+        if bleManager != nil {
+            bleManager.log("ViewModel: \(message)")
+        } else {
+            print("ViewModel (pre-activation): \(message)")
+        }
     }
 
     private func bindBLEManager() {
@@ -191,10 +208,12 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
         defaults.removeObject(forKey: "streetPass_ReceivedCards_v2")
         let newID = UUID().uuidString
         defaults.set(newID, forKey: "streetPass_PersistentUserID_v1")
+        
+        // create a whole new manager
         let freshManager = StreetPassBLEManager(userID: newID)
-        freshManager.delegate = self
         self.bleManager = freshManager
         bindBLEManager()
+
         self.cardForEditor = freshManager.localUserCard
         self.greetingName = freshManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
         self.newCardsCountForBanner = 0

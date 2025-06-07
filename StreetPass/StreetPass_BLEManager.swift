@@ -176,13 +176,15 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
     init(userID: String) {
         self.localUserCard = EncounterCard(userID: userID)
         super.init()
+        log("blemanager: init - about to create centralmanager") // <--- new log
         centralManager = CBCentralManager(delegate: self, queue: nil, options: [CBCentralManagerOptionShowPowerAlertKey: true])
+        log("blemanager: init - centralmanager created. about to create peripheralmanager") // <--- new log
         peripheralManager = CBPeripheralManager(delegate: self, queue: nil, options: [CBPeripheralManagerOptionShowPowerAlertKey: true])
-        log("StreetPass BLE Manager initialized for UserID: \(userID). Waiting for Bluetooth power state.")
+        log("blemanager: init - peripheralmanager created.") // <--- new log
+        log("StreetPass BLE Manager initialized for UserID: \(userID). Waiting for Bluetooth power state.") // keep this one too
         loadLocalUserCardFromPersistence()
         loadReceivedCardsFromPersistence()
     }
-
     func log(_ message: String, level: LogLevel = .info) {
         DispatchQueue.main.async {
             let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
@@ -331,6 +333,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
     }
 
     private func setupServiceAndStartAdvertising() {
+        log("blemanager: setupserviceandstartadvertising CALLED. current state: \(peripheralManager.state.rawValue)") // <--- new log
         guard peripheralManager.state == .poweredOn else {
             log("Peripheral: Bluetooth not powered on. Service setup deferred.", level: .warning); return
         }
@@ -358,8 +361,10 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
     }
     
     private func actuallyStartAdvertising() {
+        log("blemanager: actuallystartadvertising CALLED. isadvertising already? \(isAdvertising)") // <--- new log
         if isAdvertising { log("Peripheral: Already advertising or start attempt in progress.", level: .info); return }
         let advertisementData: [String: Any] = [CBAdvertisementDataServiceUUIDsKey: [StreetPassBLE_UUIDs.streetPassServiceUUID]]
+
         log("Peripheral: Starting advertising with data: \(advertisementData)")
         peripheralManager.startAdvertising(advertisementData) // // also async
     }
@@ -837,6 +842,7 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
 
     // MARK: - CBPeripheralManagerDelegate
     func peripheralManagerDidUpdateState(_ manager: CBPeripheralManager) {
+        log("blemanager: peripheralmanagerdidupdatestate FIRED! state: \(manager.state.rawValue)") // <--- new log
         DispatchQueue.main.async { self.delegate?.bleManagerDidUpdateState(bluetoothState: manager.state) }
         switch manager.state {
         case .poweredOn: log("Peripheral Manager: Bluetooth ON."); setupServiceAndStartAdvertising()

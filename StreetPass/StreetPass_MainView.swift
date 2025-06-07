@@ -169,6 +169,7 @@ struct StreetPass_MainView: View {
     init(isForSwiftUIPreview: Bool = false) {
         self.isForSwiftUIPreview = isForSwiftUIPreview
         _timeBasedGreeting = State(initialValue: getTimeBasedGreetingLogic())
+        print("streetpass_mainview: init happening! am i the problem?") // <-- this one
     }
     
     private func getTimeBasedGreetingLogic() -> String {
@@ -213,7 +214,9 @@ struct StreetPass_MainView: View {
 
     var body: some View {
         // this view doesn't decide what to show anymore. it just shows itself.
-        // the logic is now up in StreetPassApp.swift, where it belongs.
+        // the logic is now up in streetpassapp.swift, where it belongs.
+        // print("streetpass_mainview: body evaluating") // keep this for now, or remove if too noisy
+
         let allCards = viewModel.recentlyEncounteredCards
         let lowercasedSearchText = searchText.trimming.lowercased()
         let filteredCards: [EncounterCard] = {
@@ -230,10 +233,11 @@ struct StreetPass_MainView: View {
         }
 
         return NavigationStack {
-            mainContent(sortedCards: sortedCards)
+            mainContent(sortedCards: sortedCards) // we'll simplify mainContent's onAppear animations next if needed
                 .background(AppTheme.backgroundColor.ignoresSafeArea())
-                .background(DeviceShakeView())
+                // .background(DeviceShakeView()) // <-- temporarily commented out
                 .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
+                    print("streetpass_mainview: device did shake notification received")
                     showResetAlert = true
                 }
                 .alert("Reset StreetPass?", isPresented: $showResetAlert) {
@@ -243,16 +247,27 @@ struct StreetPass_MainView: View {
                     Text("This will erase all data and restart StreetPass.")
                 }
                 .onAppear {
+                    print("streetpass_mainview: main body .onappear triggered")
                     timeBasedGreeting = getTimeBasedGreetingLogic()
-                    withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
-                        showHeaderAvatar = true
-                    }
-                    withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
-                        showHeaderGreeting = true
-                    }
-                    withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.4)) {
-                         showMainContent = true
-                    }
+                    // initial animations are a common source of startup lag.
+                    // let's disable them for a sec to see if the core view loads.
+                    // if this works, we can re-enable them more carefully, maybe with a slight delay.
+                    
+                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
+                    //     showHeaderAvatar = true
+                    // }
+                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
+                    //     showHeaderGreeting = true
+                    // }
+                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.4)) {
+                    //      showMainContent = true
+                    // }
+                    
+                    // instead, set them directly for now
+                    showHeaderAvatar = true
+                    showHeaderGreeting = true
+                    showMainContent = true
+                    print("streetpass_mainview: onappear - flags set directly (no animation)")
                 }
         }
     }
