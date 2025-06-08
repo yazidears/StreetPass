@@ -233,7 +233,7 @@ struct StreetPass_MainView: View {
         return NavigationStack {
             mainContent(sortedCards: sortedCards)
                 .background(AppTheme.backgroundColor.ignoresSafeArea())
-                // .background(DeviceShakeView()) // MODIFICATION: Still commented for this test
+                .background(DeviceShakeView())
                 .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
                     print("streetpass_mainview: device did shake notification received") // Your print
                     showResetAlert = true
@@ -248,28 +248,20 @@ struct StreetPass_MainView: View {
                     print("streetpass_mainview: (wrapper of mainContent) .onappear triggered") // Your print
                     timeBasedGreeting = getTimeBasedGreetingLogic()
                     
-                    // MODIFICATION: Delay setting these flags to allow BLE to init
+                    // Delay setting these flags to allow BLE to init
                     Task {
                         try? await Task.sleep(nanoseconds: 70_000_000) // 0.07 seconds delay
-                        print("streetpass_mainview: (wrapper of mainContent) .onappear - setting flags AFTER DELAY") // Your print
-                        
-                        // Using your original animation calls here, triggered after the delay
-                        withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
-                            showHeaderAvatar = true
+                        print("streetpass_mainview: (wrapper of mainContent) .onappear - setting flags AFTER DELAY")
+                        await MainActor.run {
+                            withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
+                                showHeaderAvatar = true
+                            }
+                            withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
+                                showHeaderGreeting = true
+                            }
+                            showMainContent = true
+                            print("streetpass_mainview: (wrapper of mainContent) .onappear - flags set. showMainContent is now \(self.showMainContent)")
                         }
-                        withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
-                            showHeaderGreeting = true
-                        }
-                        // showMainContent will be set without its own withAnimation here,
-                        // the overall delay is handled by Task.sleep.
-                        // The animations inside mainContent will use this showMainContent value.
-                        // The original animation for showMainContent itself was:
-                        // withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.4)) { showMainContent = true }
-                        // We can simplify this by just setting it, relying on the Task's delay
-                        // and the internal animations of mainContent's children.
-                        // Or, add its own withAnimation here too if preferred. For now, direct set:
-                        self.showMainContent = true
-                         print("streetpass_mainview: (wrapper of mainContent) .onappear - flags set. showMainContent is now \(self.showMainContent)") // Your print
                     }
                 }
                 .sheet(isPresented: $isMyCardEditorPresented) { // <--- PUT IT HERE
