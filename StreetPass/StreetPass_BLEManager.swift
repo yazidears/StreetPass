@@ -37,7 +37,7 @@ enum StreetPassBLEError: Error, LocalizedError {
 }
 
 struct StreetPassBLE_UUIDs {
-    static let streetPassServiceUUID_String = "DEADBEEF-1234-5678-9ABC-DEF012345678" // // classic
+    static let streetPassServiceUUID_String = "9987c744-ddba-44ad-88e9-78d5ac724406" // // classic
     static let encounterCardCharacteristicUUID_String = "CAFEF00D-0000-1111-2222-333344445555" // // also classic
     static let streetPassServiceUUID = CBUUID(string: streetPassServiceUUID_String)
     static let encounterCardCharacteristicUUID = CBUUID(string: encounterCardCharacteristicUUID_String)
@@ -374,7 +374,25 @@ class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate
         DispatchQueue.main.async { self.isAdvertising = false }
         ongoingNotificationSends.removeAll() // // stop any pending sends
     }
-    
+    public func forgetEncounterForUser(userID: String) {
+            DispatchQueue.main.async {
+                let initialCount = self.receivedCards.count
+                self.receivedCards.removeAll { $0.userID == userID }
+                let removedCount = initialCount - self.receivedCards.count
+                
+                let debounceRemoved = self.lastEncounterTimeByUser.removeValue(forKey: userID) != nil
+                
+                if removedCount > 0 || debounceRemoved {
+                    self.log("Forgot user: \(userID). Removed \(removedCount) card(s). Debounce entry removed: \(debounceRemoved).", level: .info)
+                    self.saveReceivedCardsToPersistence() // Save the modified list
+                    self.objectWillChange.send() // Notify UI
+                    // Optionally, notify the delegate if the ViewModel needs to react specifically
+                    // self.delegate?.bleManagerDidForgetUser(userID)
+                } else {
+                    self.log("Attempted to forget user \(userID), but no matching card or debounce entry found.", level: .info)
+                }
+            }
+        }
     private func processAndStoreReceivedCard(_ card: EncounterCard, rssi: NSNumber?) {
         let now = Date()
         if let lastTime = lastEncounterTimeByUser[card.userID], now.timeIntervalSince(lastTime) < encounterDebounceInterval {

@@ -1,0 +1,3047 @@
+DrawingCanvasView.swift
+-----------------------
+// DrawingCanvasView.swift
+import SwiftUI
+import UIKit
+
+struct DrawingCanvasView: UIViewRepresentable {
+    @Binding var drawingViewInstance: DrawingView
+    
+    @Binding var selectedColor: Color
+    @Binding var selectedLineWidth: CGFloat
+    
+    @Binding var canUndoDrawing: Bool
+    @Binding var canRedoDrawing: Bool
+
+
+    func makeUIView(context: Context) -> DrawingView {
+        let view = DrawingView()
+        view.setDrawingColor(UIColor(selectedColor))
+        view.setLineWidth(selectedLineWidth)
+        
+        // Set initial undo/redo state
+        DispatchQueue.main.async {
+            self.canUndoDrawing = view.canUndo
+            self.canRedoDrawing = view.canRedo
+            self.drawingViewInstance = view
+        }
+        
+      
+        context.coordinator.drawingView = view // Give coordinator access
+        return view
+    }
+
+    func updateUIView(_ uiView: DrawingView, context: Context) {
+        uiView.setDrawingColor(UIColor(selectedColor))
+        uiView.setLineWidth(selectedLineWidth)
+
+        DispatchQueue.main.async {
+            if self.canUndoDrawing != uiView.canUndo { self.canUndoDrawing = uiView.canUndo }
+            if self.canRedoDrawing != uiView.canRedo { self.canRedoDrawing = uiView.canRedo }
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject {
+        var parent: DrawingCanvasView
+        weak var drawingView: DrawingView? // Keep a weak reference to the UIKit view
+
+        init(_ parent: DrawingCanvasView) {
+            self.parent = parent
+        }
+
+
+        @objc func drawingDidChange() {
+            // this func seems unused now, direct updates handle it
+            // //tf??? why was this even here if not called?
+            if let view = drawingView {
+                parent.canUndoDrawing = view.canUndo
+                parent.canRedoDrawing = view.canRedo
+            }
+        }
+    }
+}
+
+struct DrawingEditorSheetView: View {
+    @Binding var isPresented: Bool
+    @Binding var cardDrawingData: Data?
+
+    @State private var uiKitDrawingView = DrawingView() // Actual UIKit view instance
+    @State private var selectedColor: Color = .black
+    @State private var selectedLineWidth: CGFloat = 5.0
+    
+    @State private var canUndo: Bool = false // Local state driven by DrawingCanvasView
+    @State private var canRedo: Bool = false // Local state driven by DrawingCanvasView
+
+    let colors: [Color] = [.black, .red, .blue, .green, .yellow, .orange, .purple, .gray, AppTheme.primaryColor, Color(UIColor.white) /* Eraser */]
+    let lineWidths: [CGFloat] = [2.0, 5.0, 10.0, 20.0]
+    
+    private let drawingCanvasFixedSize = CGSize(width: 300, height: 225) // Adjusted slightly
+    private let outputImageCompressionQuality: CGFloat = 0.5 // High compression for BLE
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 8) { // Reduced global spacing
+                DrawingCanvasView(
+                    drawingViewInstance: $uiKitDrawingView,
+                    selectedColor: $selectedColor,
+                    selectedLineWidth: $selectedLineWidth,
+                    canUndoDrawing: $canUndo, // Bind to local state
+                    canRedoDrawing: $canRedo  // Bind to local state
+                )
+                .frame(width: drawingCanvasFixedSize.width, height: drawingCanvasFixedSize.height)
+                .background(Color.white) // Canvas drawing area background
+                .border(Color.gray.opacity(0.5), width: 1)
+                .padding(.horizontal) // Give IT some side padding
+                .padding(.top)
+
+
+                VStack(spacing: 10) {
+                    Text("Color").font(.caption).foregroundColor(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(colors, id: \.self) { color in
+                                Button { selectedColor = color } label: {
+                                    Circle().fill(color)
+                                        .frame(width: 28, height: 28)
+                                        .overlay(Circle().stroke(selectedColor == color ? AppTheme.primaryColor : Color.gray.opacity(0.5), lineWidth: 2))
+                                        .padding(2)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                    .frame(height: 35)
+
+                    Text("Line Width").font(.caption).foregroundColor(.secondary)
+                    Picker("Line Width", selection: $selectedLineWidth) {
+                        ForEach(lineWidths, id: \.self) { width in Text("\(Int(width))px").tag(width) }
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.horizontal)
+
+                    HStack(spacing: 15) {
+                        Button { uiKitDrawingView.undo(); updateUndoRedoFromView() } label: { Label("Undo", systemImage: "arrow.uturn.backward.circle") }
+                            .disabled(!canUndo)
+                        Button { uiKitDrawingView.redo(); updateUndoRedoFromView() } label: { Label("Redo", systemImage: "arrow.uturn.forward.circle") }
+                            .disabled(!canRedo)
+                        Spacer()
+                        Button { uiKitDrawingView.clearDrawing(); updateUndoRedoFromView() } label: { Label("Clear", systemImage: "trash") }
+                            .foregroundColor(AppTheme.destructiveColor) // Make clear more distinct
+                    }
+                    .padding([.horizontal, .top])
+                    .buttonStyle(.bordered)
+                }
+                .padding(.bottom)
+                
+                Spacer() // Pushes controls up if space available
+            }
+            .background(Color(UIColor.systemGroupedBackground).edgesIgnoringSafeArea(.bottom))
+            .navigationTitle("Draw Card")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { isPresented = false }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        let image = uiKitDrawingView.getDrawingImage(targetSize: drawingCanvasFixedSize, backgroundColor: .white)
+                        
+                        if let jpegData = image.jpegData(compressionQuality: outputImageCompressionQuality) {
+                            self.cardDrawingData = jpegData
+                            print("Drawing saved as JPEG, data size: \(jpegData.count) bytes")
+                        } else if let pngData = image.pngData() {
+                            self.cardDrawingData = pngData
+                             print("Drawing saved as PNG (JPEG failed), data size: \(pngData.count) bytes")
+                        } else {
+                            print("Failed to get drawing data.")
+                            // this aint good lol
+                            // self.cardDrawingData = nil // Or display error
+                        }
+                        isPresented = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .onAppear {
+                // lol, why here?
+                updateUndoRedoFromView()
+            }
+        }
+    }
+    
+    // Helper to sync SwiftUI's @State with the UIKit view's state
+    private func updateUndoRedoFromView() {
+        canUndo = uiKitDrawingView.canUndo
+        canRedo = uiKitDrawingView.canRedo
+    }
+}
+
+
+StreetPassApp.swift
+-------------------
+// StreetPassApp.swift
+// aka the bouncer at the club door. decides who gets in.
+
+import SwiftUI
+import UIKit // for uiimage stuff, boring but necessary
+
+// MARK: - Core Data Model: EncounterCard
+// this whole EncounterCard thing is just the digital equivalent of a business card
+// but like, for cool people.
+struct EncounterCard: Identifiable, Codable, Equatable {
+    var id: UUID
+    let userID: String
+    var displayName: String
+    var statusMessage: String
+    var avatarSymbolName: String
+    var flairField1Title: String?
+    var flairField1Value: String?
+    var flairField2Title: String?
+    var flairField2Value: String?
+    var drawingData: Data?
+    var lastUpdated: Date
+    var cardSchemaVersion: Int = 1
+    init(userID: String,
+         displayName: String = "StreetPass User",
+         statusMessage: String = "Ready for new encounters!",
+         avatarSymbolName: String = "person.crop.circle.fill",
+         drawingData: Data? = nil) {
+        self.id = UUID()
+        self.userID = userID
+        self.displayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.statusMessage = statusMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.avatarSymbolName = avatarSymbolName
+        self.drawingData = drawingData
+        self.lastUpdated = Date()
+        self.cardSchemaVersion = 2
+    }
+    var drawingImage: UIImage? {
+        guard let data = drawingData else { return nil }
+        return UIImage(data: data)
+    }
+    static func == (lhs: EncounterCard, rhs: EncounterCard) -> Bool {
+        return lhs.id == rhs.id &&
+               lhs.userID == rhs.userID &&
+               lhs.lastUpdated == rhs.lastUpdated &&
+               lhs.drawingData == rhs.drawingData
+    }
+    func isContentDifferent(from other: EncounterCard) -> Bool {
+         return self.displayName != other.displayName ||
+                self.statusMessage != other.statusMessage ||
+                self.avatarSymbolName != other.avatarSymbolName ||
+                self.flairField1Title != other.flairField1Title ||
+                self.flairField1Value != other.flairField1Value ||
+                self.flairField2Title != other.flairField2Title ||
+                self.flairField2Value != other.flairField2Value ||
+                self.drawingData != other.drawingData ||
+                self.cardSchemaVersion != other.cardSchemaVersion
+    }
+    static func placeholderCard(drawingIdentifier: String) -> EncounterCard {
+        var card = EncounterCard(userID: UUID().uuidString, displayName: "---")
+        card.avatarSymbolName = drawingIdentifier
+        card.drawingData = nil
+        return card
+    }
+    @ViewBuilder
+    func getPlaceholderDrawingView(strokeColor: Color = .black, lineWidth: CGFloat = 3) -> some View {
+        switch self.avatarSymbolName {
+        case "s_squiggle":
+            Path { path in
+                path.move(to: CGPoint(x: 20, y: 80))
+                path.addCurve(to: CGPoint(x: 80, y: 40), control1: CGPoint(x: 20, y: 30), control2: CGPoint(x: 80, y: 80))
+                path.addCurve(to: CGPoint(x: 20, y: 120), control1: CGPoint(x: 80, y: -10), control2: CGPoint(x: 20, y: 70))
+            }
+            .stroke(strokeColor, lineWidth: lineWidth)
+        case "lines_and_block":
+            VStack(spacing: 8) {
+                HStack(spacing: 15) {
+                    RoundedRectangle(cornerRadius: 2).frame(width: lineWidth, height: 50)
+                    RoundedRectangle(cornerRadius: 2).frame(width: lineWidth, height: 60)
+                    RoundedRectangle(cornerRadius: 2).frame(width: lineWidth, height: 50)
+                }
+                Spacer().frame(height:5)
+                RoundedRectangle(cornerRadius: 2).frame(height: lineWidth).padding(.horizontal, 5)
+                Spacer().frame(height:5)
+                HStack(spacing: 8){ RoundedRectangle(cornerRadius: 2).frame(height: lineWidth); RoundedRectangle(cornerRadius: 2).frame(height: lineWidth); RoundedRectangle(cornerRadius: 2).frame(height: lineWidth) }
+            }
+            .foregroundColor(strokeColor)
+            .padding(15)
+        case "flower_simple":
+            Path { path in
+                let center = CGPoint(x: 50, y: 75)
+                let petalRadius: CGFloat = 25
+                let controlOffset: CGFloat = 15
+                for i in 0..<5 {
+                    let angle = CGFloat(i) * (2 * .pi / 5) - (.pi / 2)
+                    let petalTip = CGPoint(x: center.x + petalRadius * cos(angle), y: center.y + petalRadius * sin(angle))
+                    let control1 = CGPoint(x: center.x + (petalRadius - controlOffset) * cos(angle - 0.3), y: center.y + (petalRadius - controlOffset) * sin(angle - 0.3))
+                    let control2 = CGPoint(x: center.x + (petalRadius - controlOffset) * cos(angle + 0.3), y: center.y + (petalRadius - controlOffset) * sin(angle + 0.3))
+                    path.move(to: center)
+                    path.addQuadCurve(to: petalTip, control: control1)
+                    path.addQuadCurve(to: center, control: control2)
+                }
+            }
+            .stroke(strokeColor, lineWidth: lineWidth)
+            .overlay(Circle().frame(width:15, height:15).foregroundColor(strokeColor).position(CGPoint(x:50, y:75)))
+        case "smiley_face":
+             ZStack {
+                Path { path in path.addEllipse(in: CGRect(x:25, y:35, width:50, height:50)) }.stroke(strokeColor, lineWidth: lineWidth)
+                HStack(spacing:15) { Circle().fill(strokeColor).frame(width:lineWidth+2, height:lineWidth+2); Circle().fill(strokeColor).frame(width:lineWidth+2, height:lineWidth+2) }.offset(y:-5)
+                Path { path in path.move(to: CGPoint(x:40, y:70)); path.addQuadCurve(to: CGPoint(x:60, y:70), control: CGPoint(x:50,y:80)) }.stroke(strokeColor, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            }
+        default:
+            Image(systemName: "questionmark.diamond")
+                .resizable().scaledToFit().padding(30).foregroundColor(strokeColor)
+        }
+    }
+}
+
+// MARK: - Main Application Structure
+@main
+struct StreetPassApp: App {
+    private static func getPersistentAppUserID() -> String {
+        let userDefaults = UserDefaults.standard
+        let userIDKey = "streetPass_PersistentUserID_v1"
+        if let existingID = userDefaults.string(forKey: userIDKey) {
+            print("StreetPassApp: Found existing UserID: \(existingID)")
+            return existingID
+        } else {
+            let newID = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+            userDefaults.set(newID, forKey: userIDKey)
+            print("StreetPassApp: Generated new UserID: \(newID)")
+            return newID
+        }
+    }
+
+    // The viewmodel's init is now safe and fast.
+    @StateObject private var viewModel = StreetPassViewModel(userID: StreetPassApp.getPersistentAppUserID())
+    
+    // The switch that controls the UI.
+    @State private var isAppReady = false
+
+    private func binding<T>(_ keyPath: ReferenceWritableKeyPath<StreetPassViewModel, T>) -> Binding<T> {
+        Binding(
+            get: { viewModel[keyPath: keyPath] },
+            set: { newValue in viewModel[keyPath: keyPath] = newValue }
+        )
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                if isAppReady {
+                    // Show the real app
+                    StreetPass_MainView()
+                        .environmentObject(viewModel)
+                        .fullScreenCover(isPresented: binding(\.isDrawingSheetPresented)) {
+                            DrawingEditorSheetView(
+                                isPresented: binding(\.isDrawingSheetPresented),
+                                cardDrawingData: binding(\.cardForEditor.drawingData)
+                            )
+                            .interactiveDismissDisabled()
+                        }
+                } else {
+                    // Use our new, safe LoadingView.
+                    // We give it the viewmodel and we give it the "password" (the onFinished closure)
+                    // so it can tell us when it's done setting up.
+                    LoadingView(viewModel: viewModel) {
+                        // this closure gets called when loadingview is done.
+                        // now we can safely flip the switch.
+                        print("streetpassapp: loadingview finished, gonna set isappready = true now, fingers crossed ✨") // <-- like, right here
+                        self.isAppReady = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+DrawingView.swift
+-----------------
+// DrawingView.swift
+import UIKit
+
+// Helper struct to store path, color, and line width
+struct DrawablePath {
+    var path: UIBezierPath
+    var color: UIColor
+    var lineWidth: CGFloat
+}
+
+class DrawingView: UIView {
+    private var paths: [DrawablePath] = []
+    private var currentPath: UIBezierPath?
+    private var currentColor: UIColor = .black
+    private var currentLineWidth: CGFloat = 5.0
+
+    private var redoablePaths: [DrawablePath] = []
+
+    var canUndo: Bool { !paths.isEmpty }
+    var canRedo: Bool { !redoablePaths.isEmpty }
+    
+    // Public configuration
+    func setDrawingColor(_ color: UIColor) {
+        self.currentColor = color
+    }
+
+    func setLineWidth(_ width: CGFloat) {
+        self.currentLineWidth = width
+    }
+
+    func clearDrawing() {
+        paths.removeAll()
+        redoablePaths.removeAll()
+        currentPath = nil
+        setNeedsDisplay()
+        updateUndoRedoStates() // make sure this gets picked up
+    }
+
+    func undo() {
+        guard !paths.isEmpty else { return }
+        let lastPath = paths.removeLast()
+        redoablePaths.append(lastPath)
+        setNeedsDisplay()
+        updateUndoRedoStates() // and this
+    }
+
+    func redo() {
+        guard !redoablePaths.isEmpty else { return }
+        let pathToRedo = redoablePaths.removeLast()
+        paths.append(pathToRedo)
+        setNeedsDisplay()
+        updateUndoRedoStates() // and also this
+    }
+    
+    
+    func updateUndoRedoStates() {
+        // This function primarily exists to trigger KVO or some notification if this
+        // class were an ObservableObject used directly. For UIViewRepresentable,
+        // the bindings in the wrapper + .onChange in SwiftUI view handle this.
+        // // so basically... it does nothing much by itself? ok.
+    }
+
+    func getDrawingImage(targetSize: CGSize? = nil, backgroundColor: UIColor = .white) -> UIImage {
+        let actualSize = targetSize ?? self.bounds.size
+        guard actualSize != .zero, actualSize.width > 0, actualSize.height > 0 else {
+            print("DrawingView Error: Attempted to get image with zero or negative size: \(actualSize). Returning empty UIImage.")
+            // //tf??? empty image? that's gonna break something, right?
+            return UIImage()
+        }
+
+        let renderer = UIGraphicsImageRenderer(size: actualSize)
+        return renderer.image { context in
+            backgroundColor.setFill()
+            context.fill(CGRect(origin: .zero, size: actualSize))
+
+            // // scaling stuff, fancy
+            let originalBounds = self.bounds
+            if originalBounds.size != .zero && actualSize != originalBounds.size && originalBounds.width > 0 && originalBounds.height > 0 {
+                let scaleX = actualSize.width / originalBounds.width
+                let scaleY = actualSize.height / originalBounds.height
+                context.cgContext.scaleBy(x: scaleX, y: scaleY)
+            }
+            
+            for drawablePath in paths {
+                drawablePath.color.setStroke()
+                drawablePath.path.lineWidth = drawablePath.lineWidth
+                drawablePath.path.stroke()
+            }
+        }
+    }
+    
+    func setDrawing(from newPaths: [DrawablePath]) { // Renamed parameter for clarity
+        self.paths = newPaths
+        self.redoablePaths.removeAll() // // gotta clear this too
+        setNeedsDisplay()
+        updateUndoRedoStates()
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.backgroundColor = .clear // Let parent control background, or canvas itself. Let's try clear for more flexibility.
+        setupView()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        self.backgroundColor = .clear
+        setupView()
+    }
+
+    private func setupView() {
+        isMultipleTouchEnabled = false
+        // Set contentMode to redraw on bounds change, though manual setNeedsDisplay is often used.
+        // self.contentMode = .redraw
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        let point = touch.location(in: self)
+        currentPath = UIBezierPath()
+        currentPath?.lineWidth = currentLineWidth
+        currentPath?.lineCapStyle = .round
+        currentPath?.lineJoinStyle = .round
+        currentPath?.move(to: point)
+        redoablePaths.removeAll() // Clear redo stack on new stroke // // smart move
+        // updateUndoRedoStates() // Not strictly needed here if not observing directly
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first, let path = currentPath else { return }
+        let point = touch.location(in: self)
+        path.addLine(to: point)
+        setNeedsDisplay() // // draw draw draw
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let path = currentPath else { return }
+        paths.append(DrawablePath(path: path, color: currentColor, lineWidth: currentLineWidth))
+        currentPath = nil // // done with this path
+        setNeedsDisplay()
+        updateUndoRedoStates()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        currentPath = nil // // oh well, cancelled
+        setNeedsDisplay()
+        // updateUndoRedoStates() // If a stroke was in progress
+    }
+
+    override func draw(_ rect: CGRect) {
+        super.draw(rect) // // gotta call super
+
+        // // actual drawing happens here
+        for drawablePath in paths {
+            drawablePath.color.setStroke()
+            drawablePath.path.lineWidth = drawablePath.lineWidth
+            drawablePath.path.stroke()
+        }
+
+        // // and the current one being drawn
+        if let currentDrawingPath = currentPath {
+            currentColor.setStroke()
+            currentDrawingPath.lineWidth = currentLineWidth
+            currentDrawingPath.stroke()
+        }
+    }
+}
+
+
+StreetPass_MainView.swift
+-------------------------
+// StreetPass_MainView.swift
+// this is the main screen, the whole damn thing.
+
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct ShareSheetView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+fileprivate class HapticManager {
+    static let shared = HapticManager()
+    private init() {}
+
+    func impact(style: UIImpactFeedbackGenerator.FeedbackStyle) {
+        let generator = UIImpactFeedbackGenerator(style: style)
+        generator.prepare()
+        generator.impactOccurred()
+    }
+
+    func notification(type: UINotificationFeedbackGenerator.FeedbackType) {
+        let generator = UINotificationFeedbackGenerator()
+        generator.prepare()
+        generator.notificationOccurred(type)
+    }
+}
+
+fileprivate struct PulsatingModifier: ViewModifier {
+    @State private var isPulsing = false
+    let active: Bool
+    let duration: Double
+    let minOpacity: Double
+    let maxScale: Double
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(active && isPulsing ? minOpacity : 1.0)
+            .scaleEffect(active && isPulsing ? maxScale : 1.0)
+            .onChange(of: active, initial: true) { oldActive, newActive in
+                if newActive {
+                    isPulsing = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                        withAnimation(Animation.easeInOut(duration: duration).repeatForever(autoreverses: true)) {
+                            isPulsing = true
+                        }
+                    }
+                } else {
+                    withAnimation(.easeInOut(duration: duration / 2)) {
+                        isPulsing = false
+                    }
+                }
+            }
+    }
+}
+
+fileprivate extension View {
+    func pulsating(active: Bool, duration: Double = 1.2, minOpacity: Double = 0.5, maxScale: Double = 1.1) -> some View {
+        self.modifier(PulsatingModifier(active: active, duration: duration, minOpacity: minOpacity, maxScale: maxScale))
+    }
+}
+
+fileprivate struct GlassBackgroundModifier: ViewModifier {
+    var cornerRadius: CGFloat
+    var material: Material
+    var strokeColor: Color
+    var strokeWidth: CGFloat
+    var customShadow: ShadowStyle
+
+    enum ShadowStyle {
+        case none
+        case soft
+        case medium
+        case custom(color: Color, radius: CGFloat, x: CGFloat, y: CGFloat)
+    }
+
+    func body(content: Content) -> some View {
+        let base = content
+            .background(material)
+            .cornerRadius(cornerRadius)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .stroke(strokeColor, lineWidth: strokeWidth)
+            )
+        
+        switch customShadow {
+        case .none:
+            return base.shadow(color: .clear, radius: 0, x: 0, y: 0)
+        case .soft:
+            return base.shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
+        case .medium:
+            return base.shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 4)
+        case .custom(let color, let radius, let x, let y):
+            return base.shadow(color: color, radius: radius, x: x, y: y)
+        }
+    }
+}
+
+fileprivate extension View {
+    func glassBackground(
+        cornerRadius: CGFloat = 15,
+        material: Material = AppTheme.glassMaterialThin,
+        strokeColor: Color = AppTheme.glassBorder,
+        strokeWidth: CGFloat = 1,
+        shadow: GlassBackgroundModifier.ShadowStyle = .medium
+    ) -> some View {
+        self.modifier(GlassBackgroundModifier(cornerRadius: cornerRadius, material: material, strokeColor: strokeColor, strokeWidth: strokeWidth, customShadow: shadow))
+    }
+}
+
+
+struct StreetPass_MainView: View {
+    @EnvironmentObject private var viewModel: StreetPassViewModel
+    @State private var searchText: String = ""
+    private let isForSwiftUIPreview: Bool
+
+    @State private var showHeaderAvatar = false
+    @State private var showHeaderGreeting = false
+    @State private var showMainContent = false
+    @State private var scrollOffset: CGFloat = 0
+    @State private var timeBasedGreeting: String = ""
+    @State private var showResetAlert: Bool = false
+
+
+    @AppStorage("favorite_user_ids_json_v1") private var _appStorageFavoriteUserIDsJSON: String = "[]"
+    private var favoriteUserIDs: Set<String> {
+        get {
+            if isForSwiftUIPreview {
+                if let data = UserDefaults.standard
+                    .string(forKey: "favorite_user_ids_json_v1")?
+                    .data(using: .utf8),
+                   let ids = try? JSONDecoder().decode(Set<String>.self, from: data) {
+                    return ids
+                }
+                return ["userA_old"]
+            }
+            guard let data = _appStorageFavoriteUserIDsJSON.data(using: .utf8),
+                  let ids = try? JSONDecoder().decode(Set<String>.self, from: data) else {
+                return []
+            }
+            return ids
+        }
+        set {
+            if let encoded = try? JSONEncoder().encode(newValue),
+               let stringified = String(data: encoded, encoding: .utf8) {
+                _appStorageFavoriteUserIDsJSON = stringified
+            } else {
+                _appStorageFavoriteUserIDsJSON = "[]"
+            }
+        }
+    }
+
+    private func cardMatchesSearchText(card: EncounterCard, lowercasedSearchText: String) -> Bool {
+        if card.displayName.lowercased().contains(lowercasedSearchText) { return true }
+        if card.statusMessage.lowercased().contains(lowercasedSearchText) { return true }
+        if let f1 = card.flairField1Title?.lowercased(), f1.contains(lowercasedSearchText) { return true }
+        if let v1 = card.flairField1Value?.lowercased(), v1.contains(lowercasedSearchText) { return true }
+        if let f2 = card.flairField2Title?.lowercased(), f2.contains(lowercasedSearchText) { return true }
+        if let v2 = card.flairField2Value?.lowercased(), v2.contains(lowercasedSearchText) { return true }
+        return false
+    }
+
+    init(isForSwiftUIPreview: Bool = false) {
+        self.isForSwiftUIPreview = isForSwiftUIPreview
+        _timeBasedGreeting = State(initialValue: getTimeBasedGreetingLogic())
+        print("streetpass_mainview: init happening! am i the problem?") // <-- this one
+    }
+    
+    private func getTimeBasedGreetingLogic() -> String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let greetings: [String]
+
+        switch hour {
+        case 4..<7: // Early Morning (4 AM - 6:59 AM)
+            greetings = [
+                "Early bird, huh?", "Sun's barely up, good to see ya!", "Morning's quiet magic is here.",
+                "Hope you've got coffee brewing!", "Dawn's breaking, how are you?", "A fresh start to the day!",
+                "Quiet moments before the rush.", "Wishing you a peaceful morning."
+            ]
+        case 7..<12: // Morning (7 AM - 11:59 AM)
+            greetings = [
+                "Good mornin'!", "Hope your day's off to a great start!", "Bright morning to ya!",
+                "What's the plan for today?", "Enjoying the morning vibes?", "Hello there, sunshine!",
+                "May your coffee be strong today!", "Ready to seize the day?"
+            ]
+        case 12..<17: // Afternoon (12 PM - 4:59 PM)
+            greetings = [
+                "Good afternoon!", "Hope your afternoon is going well.", "How's the day treating you?",
+                "Taking a break, or powering through?", "Afternoon vibes are in full swing!", "Sun's high, hope your spirits are too!",
+                "Keep that energy up!", "Making the most of the afternoon?"
+            ]
+        case 17..<21: // Evening (5 PM - 8:59 PM)
+            greetings = [
+                "Good evening!", "How's the evening treating you?", "Winding down, or just getting started?",
+                "Hope you had a wonderful day.", "Evening's here, time to relax a bit!", "The stars will be out soon.",
+                "Enjoy the evening calm.", "What's cookin' tonight? Smells good!"
+            ]
+        default: // Late Night (9 PM - 3:59 AM)
+            greetings = [
+                "Burning the midnight oil?", "Late night explorer, I see.", "Hope you're having a peaceful night.",
+                "The world's quiet now, isn't it?", "Sweet dreams, or more adventures ahead?", "Night owl greetings to you!",
+                "Wishing you a restful night's journey.", "Almost tomorrow, or still today for you?"
+            ]
+        }
+        return greetings.randomElement() ?? "Hello there!"
+    }
+
+
+    var body: some View {
+        // this view doesn't decide what to show anymore. it just shows itself.
+        // the logic is now up in streetpassapp.swift, where it belongs.
+        // print("streetpass_mainview: body evaluating") // keep this for now, or remove if too noisy
+
+        let allCards = viewModel.recentlyEncounteredCards
+        let lowercasedSearchText = searchText.trimming.lowercased()
+        let filteredCards: [EncounterCard] = {
+            guard !lowercasedSearchText.isEmpty else { return allCards }
+            return allCards.filter { cardMatchesSearchText(card: $0, lowercasedSearchText: lowercasedSearchText) }
+        }()
+
+        let sortedCards = filteredCards.sorted { a, b in
+            let aFav = favoriteUserIDs.contains(a.userID)
+            let bFav = favoriteUserIDs.contains(b.userID)
+            if aFav && !bFav { return true }
+            if !aFav && bFav { return false }
+            return a.displayName.lowercased() < b.displayName.lowercased()
+        }
+
+        return NavigationStack {
+            mainContent(sortedCards: sortedCards) // we'll simplify mainContent's onAppear animations next if needed
+                .background(AppTheme.backgroundColor.ignoresSafeArea())
+                // .background(DeviceShakeView()) // <-- temporarily commented out
+                .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
+                    print("streetpass_mainview: device did shake notification received")
+                    showResetAlert = true
+                }
+                .alert("Reset StreetPass?", isPresented: $showResetAlert) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Reset", role: .destructive) { viewModel.resetAllData() }
+                } message: {
+                    Text("This will erase all data and restart StreetPass.")
+                }
+                .onAppear {
+                    print("streetpass_mainview: main body .onappear triggered")
+                    timeBasedGreeting = getTimeBasedGreetingLogic()
+                    // initial animations are a common source of startup lag.
+                    // let's disable them for a sec to see if the core view loads.
+                    // if this works, we can re-enable them more carefully, maybe with a slight delay.
+                    
+                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
+                    //     showHeaderAvatar = true
+                    // }
+                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
+                    //     showHeaderGreeting = true
+                    // }
+                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.4)) {
+                    //      showMainContent = true
+                    // }
+                    
+                    // instead, set them directly for now
+                    showHeaderAvatar = true
+                    showHeaderGreeting = true
+                    showMainContent = true
+                    print("streetpass_mainview: onappear - flags set directly (no animation)")
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func mainContent(sortedCards: [EncounterCard]) -> some View {
+        ScrollViewOffsetTracker(scrollOffset: $scrollOffset) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    headerSection()
+                    
+                    searchBar
+                        .padding(.top, -30)
+                        .zIndex(1)
+                        .opacity(showMainContent ? 1 : 0)
+                        .offset(y: showMainContent ? 0 : 20)
+                        .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.1 : 0.4), value: showMainContent)
+
+                    LazyVStack(alignment: .leading, spacing: 24) {
+                        RecentCardsSwappedSectionView(
+                            viewModel: viewModel
+                        ) {
+                            viewModel.showInfoMessage("view all recent cards tapped!")
+                            HapticManager.shared.impact(style: .light)
+                        }
+
+                        StatusSectionView(viewModel: viewModel)
+
+                        Button {
+                            viewModel.prepareCardForEditing()
+                            viewModel.openDrawingEditor()
+                            HapticManager.shared.impact(style: .medium)
+                        } label: {
+                            Label("Draw / Edit My Card", systemImage: "pencil.and.scribble")
+                                .font(.headline.weight(.semibold))
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(AppTheme.spAccentYellow)
+                                .foregroundColor(AppTheme.spPrimaryText)
+                                .cornerRadius(12)
+                                .shadow(color: AppTheme.spAccentYellow.opacity(0.5), radius: 8, y: 4)
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom)
+                        .buttonStyle(ScaleDownButtonStyle(scaleFactor: 0.95, opacityFactor: 0.9))
+                        
+                        connectionsSection(sortedCards: sortedCards)
+                    }
+                    .padding(.top)
+                    .opacity(showMainContent ? 1 : 0)
+                    .offset(y: showMainContent ? 0 : 20)
+                    .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.2 : 0.4), value: showMainContent)
+                }
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    @ViewBuilder
+    private func headerSection() -> some View {
+        let parallaxFactor: CGFloat = 0.3
+        let headerHeight: CGFloat = 200
+        let dynamicHeight = max(headerHeight, headerHeight - scrollOffset * parallaxFactor)
+        
+        VStack(spacing: 0) {
+            ZStack(alignment: .bottomLeading) {
+                LinearGradient(
+                    colors: [AppTheme.spGradientStart, AppTheme.spGradientMid, AppTheme.spGradientEnd],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(height: dynamicHeight)
+                .clipShape(RoundedCornersShape(corners: [.bottomLeft, .bottomRight], radius: 30))
+                .shadow(color: AppTheme.spGradientEnd.opacity(0.6), radius: 12, y: 6)
+                .offset(y: scrollOffset > 0 ? -scrollOffset * parallaxFactor : 0)
+
+                HStack(alignment: .center, spacing: 15) {
+                    Image(systemName: viewModel.myCurrentCard.avatarSymbolName)
+                        .font(.system(size: 48))
+                        .foregroundColor(.white)
+                        .padding(15)
+                        .background(
+                            Circle().fill(Color.white.opacity(0.2))
+                                .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 2)
+                        )
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.6), lineWidth: 2))
+                        .opacity(showHeaderAvatar ? 1 : 0)
+                        .scaleEffect(showHeaderAvatar ? 1 : 0.7)
+                        .offset(x: showHeaderAvatar ? 0 : -25, y: showHeaderAvatar ? 0 : 10)
+
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(timeBasedGreeting)
+                            .font(.title.bold())
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+
+
+                        if viewModel.newCardsCountForBanner > 0 {
+                            Label("You have \(viewModel.newCardsCountForBanner) new cards", systemImage: "sparkles.square.filled.on.square")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(AppTheme.spAccentYellow)
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 12)
+                                .background(Color.black.opacity(0.35))
+                                .clipShape(Capsule())
+                                .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                        }
+                    }
+                    .opacity(showHeaderGreeting ? 1 : 0)
+                    .offset(x: showHeaderGreeting ? 0 : -25)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 55)
+                .offset(y: scrollOffset > 0 ? -scrollOffset * (parallaxFactor * 0.8) : 0)
+            }
+        }
+        .frame(minHeight: headerHeight)
+    }
+
+    @ViewBuilder
+    private var searchBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(AppTheme.spSecondaryText)
+            TextField("Search encounters...", text: $searchText)
+                .textFieldStyle(.plain)
+                .foregroundColor(AppTheme.spPrimaryText)
+            if !searchText.isEmpty {
+                Button(action: { self.searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(AppTheme.spSecondaryText.opacity(0.8))
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: searchText.isEmpty)
+        .padding(12)
+        .glassBackground(cornerRadius: 12, material: AppTheme.glassMaterialUltraThin, strokeColor: AppTheme.glassBorderSubtle, shadow: .soft)
+        .padding(.horizontal)
+    }
+    
+    @ViewBuilder
+    private func connectionsSection(sortedCards: [EncounterCard]) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Encounters")
+                    .font(.title2.bold())
+                    .foregroundColor(AppTheme.spPrimaryText)
+                Spacer()
+                if !sortedCards.isEmpty {
+                    Button(action: {
+                        viewModel.showInfoMessage("See All Encounters tapped")
+                        HapticManager.shared.impact(style: .light)
+                    }) {
+                        Text("See All")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(AppTheme.primaryColor)
+                    }
+                }
+            }
+            .padding(.horizontal)
+
+            if sortedCards.isEmpty && searchText.isEmpty {
+                 VStack(spacing: 12) {
+                    Image(systemName: "person.3.sequence.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(AppTheme.spSecondaryText.opacity(0.6))
+                        .padding(20)
+                        .background(AppTheme.spSecondaryText.opacity(0.05))
+                        .clipShape(Circle())
+                    Text("No Encounters Yet")
+                        .font(.title3.weight(.medium))
+                    Text("Start exploring to meet new people!")
+                        .font(.callout)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+                .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .padding(.horizontal)
+
+            } else if sortedCards.isEmpty && !searchText.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 50))
+                        .foregroundColor(AppTheme.spSecondaryText.opacity(0.6))
+                        .padding(20)
+                        .background(AppTheme.spSecondaryText.opacity(0.05))
+                        .clipShape(Circle())
+                    Text("No Results Found")
+                        .font(.title3.weight(.medium))
+                    Text("Try a different search term for '\(searchText)'.")
+                        .font(.callout)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+                .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .padding(.horizontal)
+            } else {
+                LazyVStack(spacing: 12) {
+                    ForEach(sortedCards) { card in
+                        NavigationLink(destination:
+                            ReceivedCardDetailView(
+                                card: card,
+                                isFavorite: favoriteUserIDs.contains(card.userID),
+                                toggleFavoriteAction: {
+                                    changeFavorite(userID: card.userID)
+                                }
+                            )
+                        ) {
+                            HStack(spacing: 15) {
+                                card.getPlaceholderDrawingView()
+                                    .frame(width: 55, height: 75)
+                                    .background(AppTheme.userSpecificColor(for: card.userID).opacity(0.1))
+                                    .cornerRadius(8)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(AppTheme.userSpecificColor(for: card.userID), lineWidth: 2)
+                                    )
+                                    .shadow(color: AppTheme.userSpecificColor(for: card.userID).opacity(0.25), radius: 3, y: 1)
+
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(card.displayName)
+                                        .font(.headline.weight(.semibold))
+                                        .foregroundColor(AppTheme.spPrimaryText)
+                                        .lineLimit(1)
+                                    Text(card.statusMessage)
+                                        .font(.subheadline)
+                                        .foregroundColor(AppTheme.spSecondaryText)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                if favoriteUserIDs.contains(card.userID) {
+                                    Image(systemName: "star.fill")
+                                        .foregroundColor(AppTheme.spAccentYellow)
+                                        .font(.title3)
+                                        .shadow(color: AppTheme.spAccentYellow.opacity(0.5), radius: 3)
+                                        .transition(.scale(scale: 1.4).combined(with: .opacity))
+                                }
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(AppTheme.spTertiaryText)
+                            }
+                            .padding()
+                            .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, strokeColor: AppTheme.glassBorderSubtle, shadow: .soft)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        .animation(.spring(response: 0.35, dampingFraction: 0.55), value: favoriteUserIDs.contains(card.userID))
+                    }
+                }
+                .padding(.horizontal)
+            }
+            Spacer(minLength: 20)
+        }
+    }
+
+    private func changeFavorite(userID: String) {
+        HapticManager.shared.impact(style: .medium)
+        var updated = favoriteUserIDs
+        let isAdding = !updated.contains(userID)
+        
+        if isAdding {
+            updated.insert(userID)
+            HapticManager.shared.notification(type: .success)
+        } else {
+            updated.remove(userID)
+        }
+        
+        if let encoded = try? JSONEncoder().encode(updated),
+           let stringified = String(data: encoded, encoding: .utf8) {
+            _appStorageFavoriteUserIDsJSON = stringified
+        }
+    }
+}
+
+struct RecentCardsSwappedSectionView: View {
+    @ObservedObject var viewModel: StreetPassViewModel
+    var onTapAll: () -> Void
+    @State private var cardAppeared: [UUID: Bool] = [:]
+    @State private var sectionVisible = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recent Swaps")
+                    .font(.title2.bold())
+                    .foregroundColor(AppTheme.spPrimaryText)
+                Spacer()
+                Button(action: onTapAll) {
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(AppTheme.primaryColor.opacity(0.8))
+                }
+            }
+            .padding(.horizontal)
+            .opacity(sectionVisible ? 1 : 0)
+            .offset(y: sectionVisible ? 0 : 15)
+
+            let displayCards: [EncounterCard] = {
+                if viewModel.recentlyEncounteredCards.isEmpty {
+                    return [
+                        EncounterCard.placeholderCard(drawingIdentifier: "s_squiggle"),
+                        EncounterCard.placeholderCard(drawingIdentifier: "lines_and_block"),
+                        EncounterCard.placeholderCard(drawingIdentifier: "flower_simple"),
+                        EncounterCard.placeholderCard(drawingIdentifier: "smiley_face")
+                    ]
+                } else {
+                    return Array(viewModel.recentlyEncounteredCards.prefix(6))
+                }
+            }()
+
+            if displayCards.isEmpty {
+                Text("Swap cards with others to see them here!")
+                    .font(.callout)
+                    .foregroundColor(AppTheme.spSecondaryText)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .glassBackground(cornerRadius: 10, material: AppTheme.cardBackgroundColor, shadow: .soft)
+                    .padding(.horizontal)
+                    .opacity(sectionVisible ? 1 : 0)
+                    .offset(y: sectionVisible ? 0 : 15)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 15) {
+                        ForEach(Array(displayCards.enumerated()), id: \.element.id) { index, card in
+                            RecentCardItemView(card: card) {
+                                viewModel.showInfoMessage("tapped on card id: \(card.id.uuidString.prefix(4))")
+                                HapticManager.shared.impact(style: .light)
+                            }
+                            .opacity(cardAppeared[card.id, default: false] ? 1 : 0)
+                            .rotation3DEffect(
+                                .degrees(cardAppeared[card.id, default: false] ? 0 : -15),
+                                axis: (x: 0, y: 1, z: 0),
+                                anchor: .leading
+                            )
+                            .offset(y: cardAppeared[card.id, default: false] ? 0 : 15)
+                            .onAppear {
+                                if sectionVisible {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.08 * Double(index))) {
+                                        cardAppeared[card.id] = true
+                                    }
+                                }
+                            }
+                            .onChange(of: sectionVisible) { _, newVisible in
+                                if newVisible {
+                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.08 * Double(index))) {
+                                        cardAppeared[card.id] = true
+                                    }
+                                } else {
+                                    cardAppeared[card.id] = false
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal)
+                }
+            }
+        }
+        .onAppear {
+            withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.1)) {
+                sectionVisible = true
+            }
+        }
+    }
+}
+
+struct RecentCardItemView: View {
+    let card: EncounterCard
+    var onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 8) {
+                card.getPlaceholderDrawingView()
+                    .frame(width: 90, height: 130)
+                    .background(AppTheme.userSpecificColor(for: card.userID).opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(AppTheme.userSpecificColor(for: card.userID), lineWidth: 2.5)
+                    )
+                    .cornerRadius(12)
+                    .glassBackground(cornerRadius: 12, material: AppTheme.glassMaterialUltraThin, strokeColor: AppTheme.userSpecificColor(for: card.userID).opacity(0.7), strokeWidth: 1.5, shadow: .custom(color: AppTheme.userSpecificColor(for: card.userID).opacity(0.3), radius: 6, x:0, y:3))
+                    
+
+                Text(card.displayName.isEmpty ? "Encounter" : card.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(AppTheme.spPrimaryText)
+                    .lineLimit(1)
+                    .frame(width: 90)
+            }
+        }
+        .buttonStyle(ScaleDownButtonStyle(scaleFactor: 0.94, opacityFactor: 0.9))
+    }
+}
+
+struct StatusSectionView: View {
+    @ObservedObject var viewModel: StreetPassViewModel
+    @State private var sectionVisible = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Device Status")
+                .font(.title2.bold())
+                .foregroundColor(AppTheme.spPrimaryText)
+                .padding(.horizontal)
+                .opacity(sectionVisible ? 1 : 0)
+                .offset(y: sectionVisible ? 0 : 15)
+
+
+            VStack(spacing: 10) {
+                StatusBoxView(
+                    title: viewModel.isBluetoothOn ? "Bluetooth Active" : "Bluetooth Offline",
+                    subtitle: viewModel.isBluetoothOn ? "Ready to connect" : "Enable Bluetooth for StreetPass",
+                    iconName: viewModel.isBluetoothOn ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right.slash.circle.fill",
+                    mainColor: viewModel.isBluetoothOn ? AppTheme.positiveColor : AppTheme.warningColor,
+                    isPulsingActive: viewModel.isBluetoothOn
+                )
+                .opacity(sectionVisible ? 1 : 0)
+                .offset(y: sectionVisible ? 0 : 15)
+                .animation(.spring(response: 0.4, dampingFraction: 0.6).delay(sectionVisible ? 0.1 : 0), value: sectionVisible)
+                
+                let adStatus = viewModel.isAdvertisingActive ? "ON" : "OFF"
+                let scanStatus = viewModel.isScanningActive ? "ON" : "OFF"
+                let spassOverallStatus = (viewModel.isAdvertisingActive || viewModel.isScanningActive)
+                
+                StatusBoxView(
+                    title: "StreetPass \(spassOverallStatus ? "Active" : "Inactive")",
+                    subtitle: "Advertising: \(adStatus), Scanning: \(scanStatus)",
+                    iconName: spassOverallStatus ? "network.badge.shield.half.filled" : "network.slash",
+                    mainColor: spassOverallStatus ? AppTheme.positiveColor : AppTheme.primaryColor.opacity(0.8),
+                    isPulsingActive: spassOverallStatus
+                )
+                .opacity(sectionVisible ? 1 : 0)
+                .offset(y: sectionVisible ? 0 : 15)
+                .animation(.spring(response: 0.4, dampingFraction: 0.6).delay(sectionVisible ? 0.2 : 0), value: sectionVisible)
+            }
+            .padding(.horizontal)
+        }
+        .onAppear {
+            withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.2)) {
+                sectionVisible = true
+            }
+        }
+    }
+}
+
+struct StatusBoxView: View {
+    let title: String
+    let subtitle: String
+    let iconName: String
+    let mainColor: Color
+    let isPulsingActive: Bool
+
+    var body: some View {
+        HStack(spacing: 15) {
+            Image(systemName: iconName)
+                .font(.title)
+                .foregroundColor(mainColor)
+                .frame(width: 35, height: 35)
+                .padding(8)
+                .background(mainColor.opacity(0.15))
+                .clipShape(Circle())
+                .pulsating(active: isPulsingActive, duration: 1.5, minOpacity: 0.3, maxScale: 1.25)
+                .shadow(color: mainColor.opacity(0.3), radius: isPulsingActive ? 8 : 3, y: 2)
+                
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundColor(AppTheme.spPrimaryText)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(AppTheme.spSecondaryText)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .glassBackground(cornerRadius: 12, material: AppTheme.cardBackgroundColor, strokeColor: mainColor.opacity(0.3), strokeWidth: 1, shadow: .custom(color: mainColor.opacity(0.1), radius: 4, x:0, y:2))
+    }
+}
+
+struct ReceivedCardDetailView: View {
+    let card: EncounterCard
+    @State var isFavorite: Bool
+    let toggleFavoriteAction: () -> Void
+
+    private let drawingDisplayMaxHeight: CGFloat = 300
+    private let userColor: Color
+    @State private var showAvatarAndName = false
+    @State private var showFlair = false
+    @State private var showInfo = false
+    @State private var showActions = false
+    @State private var showDrawing = false
+
+
+    init(
+        card: EncounterCard,
+        isFavorite: Bool,
+        toggleFavoriteAction: @escaping () -> Void
+    ) {
+        self.card = card
+        self._isFavorite = State(initialValue: isFavorite)
+        self.toggleFavoriteAction = toggleFavoriteAction
+        self.userColor = AppTheme.userSpecificColor(for: card.userID)
+    }
+
+    private var drawingSection: some View {
+        Group {
+            if let drawingUiImage = card.drawingImage {
+                Image(uiImage: drawingUiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: drawingDisplayMaxHeight)
+                    .background(Color.white)
+                    .cornerRadius(15)
+                    .glassBackground(cornerRadius:15, material: AppTheme.glassMaterialUltraThin, strokeColor: userColor.opacity(0.5), strokeWidth: 2, shadow: .custom(color: userColor.opacity(0.3), radius: 10, x:0, y:6))
+                    .padding()
+                    
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "eye.slash.circle.fill")
+                        .font(.system(size: 70))
+                        .foregroundColor(userColor.opacity(0.7))
+                    Text("No Drawing Shared")
+                        .font(.title2.weight(.medium))
+                        .foregroundColor(userColor.opacity(0.9))
+                    Text("This user hasn't shared a drawing on their card.")
+                        .font(.callout)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .frame(maxWidth: .infinity, minHeight: drawingDisplayMaxHeight * 0.6)
+                .background(userColor.opacity(0.1))
+                .glassBackground(cornerRadius: 15, material: AppTheme.glassMaterialUltraThin, strokeColor: userColor.opacity(0.15), strokeWidth: 1.5, shadow: .soft)
+                .padding()
+            }
+        }
+        .opacity(showDrawing ? 1 : 0)
+        .scaleEffect(showDrawing ? 1 : 0.85)
+        .offset(y: showDrawing ? 0 : 20)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                drawingSection
+
+                VStack(spacing: 12) {
+                    Image(systemName: card.avatarSymbolName)
+                        .font(.system(size: 70))
+                        .padding(20)
+                        .foregroundColor(userColor)
+                        .background(
+                            Circle()
+                                .fill(userColor.opacity(0.1))
+                                .glassBackground(cornerRadius: 60, material: AppTheme.glassMaterialThin, strokeColor: userColor.opacity(0.3), strokeWidth: 2, shadow: .custom(color: userColor.opacity(0.2), radius:5, x:0,y:3))
+                        )
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(userColor, lineWidth: 3.5))
+                        .shadow(color: userColor.opacity(0.4), radius: 8, x:0, y:4)
+
+
+                    Text(card.displayName)
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(AppTheme.spPrimaryText)
+
+                    Text(card.statusMessage)
+                        .font(.title3)
+                        .foregroundColor(AppTheme.spSecondaryText)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .padding(.vertical)
+                .opacity(showAvatarAndName ? 1 : 0)
+                .offset(y: showAvatarAndName ? 0 : 15)
+
+                if card.flairField1Title != nil || card.flairField1Value != nil || card.flairField2Title != nil || card.flairField2Value != nil {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if let t1 = card.flairField1Title, let v1 = card.flairField1Value, !t1.trimming.isEmpty || !v1.trimming.isEmpty {
+                            FlairDisplayRow(title: t1, value: v1, icon: "rosette", iconColor: userColor)
+                        }
+                        if (card.flairField1Title != nil || card.flairField1Value != nil) &&
+                           (card.flairField2Title != nil || card.flairField2Value != nil) &&
+                           !(card.flairField1Title?.trimming.isEmpty ?? true && card.flairField1Value?.trimming.isEmpty ?? true) &&
+                           !(card.flairField2Title?.trimming.isEmpty ?? true && card.flairField2Value?.trimming.isEmpty ?? true) {
+                            Divider().padding(.vertical, 4)
+                        }
+                        if let t2 = card.flairField2Title, let v2 = card.flairField2Value, !t2.trimming.isEmpty || !v2.trimming.isEmpty {
+                            FlairDisplayRow(title: t2, value: v2, icon: "star.circle.fill", iconColor: userColor)
+                        }
+                    }
+                    .padding()
+                    .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
+                    .padding(.horizontal)
+                    .opacity(showFlair ? 1 : 0)
+                    .offset(y: showFlair ? 0 : 15)
+                }
+                
+                VStack(alignment: .leading, spacing: 10) {
+                    Label {
+                        Text("Schema Version: \(card.cardSchemaVersion)")
+                    } icon: {
+                        Image(systemName: "number.square.fill")
+                            .foregroundColor(userColor)
+                    }
+                    .font(.caption)
+                    .foregroundColor(AppTheme.spSecondaryText)
+
+                    Label {
+                        Text("Last Updated: \(card.lastUpdated, style: .date) at \(card.lastUpdated, style: .time)")
+                    } icon: {
+                        Image(systemName: "clock.fill")
+                             .foregroundColor(userColor)
+                    }
+                    .font(.caption)
+                    .foregroundColor(AppTheme.spSecondaryText)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, shadow: .soft)
+                .padding(.horizontal)
+                .opacity(showInfo ? 1 : 0)
+                .offset(y: showInfo ? 0 : 15)
+
+                HStack(spacing: 15) {
+                    Button {
+                        HapticManager.shared.impact(style: .medium)
+                        let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
+                        impactHeavy.prepare()
+                        
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.4)) {
+                            toggleFavoriteAction()
+                            self.isFavorite.toggle()
+                            if self.isFavorite {
+                                impactHeavy.impactOccurred()
+                            }
+                        }
+                    } label: {
+                        Label(
+                            isFavorite ? "Favorited" : "Favorite",
+                            systemImage: isFavorite ? "star.fill" : "star"
+                        )
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(isFavorite ? AppTheme.spAccentYellow : userColor.opacity(0.85))
+                    .controlSize(.large)
+                    .shadow(color: (isFavorite ? AppTheme.spAccentYellow : userColor).opacity(0.4), radius: isFavorite ? 10 : 5, y: isFavorite ? 5 : 2)
+
+
+                    Button {
+                        HapticManager.shared.impact(style: .light)
+                        print("Share card \(card.id.uuidString.prefix(4)) tapped - (placeholder action)")
+                    } label: {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                            .font(.headline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(userColor)
+                    .controlSize(.large)
+                }
+                .padding([.horizontal, .bottom])
+                .opacity(showActions ? 1 : 0)
+                .offset(y: showActions ? 0 : 15)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.05)) { showDrawing = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.15)) { showAvatarAndName = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.25)) { showFlair = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.35)) { showInfo = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7).delay(0.45)) { showActions = true }
+        }
+        .background(
+            LinearGradient(
+                colors: [userColor.opacity(0.15), AppTheme.backgroundColor, AppTheme.backgroundColor],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
+        .navigationTitle(card.displayName)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    HapticManager.shared.impact(style: .medium)
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.4)) {
+                        toggleFavoriteAction()
+                        self.isFavorite.toggle()
+                    }
+                } label: {
+                    Image(systemName: isFavorite ? "star.fill" : "star")
+                        .imageScale(.large)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(isFavorite ? AppTheme.spAccentYellow : AppTheme.primaryColor, isFavorite ? AppTheme.spAccentYellow.opacity(0.5) : AppTheme.primaryColor.opacity(0.3))
+                }
+                .font(.title2)
+                .scaleEffect(isFavorite ? 1.1 : 1.0)
+            }
+        }
+    }
+}
+
+struct FlairDisplayRow: View {
+    let title: String
+    let value: String
+    let icon: String
+    let iconColor: Color
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title2.weight(.medium))
+                .foregroundColor(iconColor)
+                .frame(width: 30, alignment: .center)
+                .shadow(color: iconColor.opacity(0.3), radius: 2)
+            VStack(alignment: .leading) {
+                Text(title.isEmpty ? "Info" : title)
+                    .font(.headline)
+                    .foregroundColor(AppTheme.spPrimaryText)
+                Text(value.isEmpty ? "Not specified" : value)
+                    .font(.callout)
+                    .foregroundColor(AppTheme.spSecondaryText)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+struct ScaleDownButtonStyle: ButtonStyle {
+    var scaleFactor: CGFloat = 0.97
+    var opacityFactor: CGFloat = 0.9
+    
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scaleFactor : 1.0)
+            .opacity(configuration.isPressed ? opacityFactor : 1.0)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+struct RoundedCornersShape: Shape {
+    var corners: UIRectCorner
+    var radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
+    }
+}
+
+struct ScrollViewOffsetTracker<Content: View>: View {
+    @Binding var scrollOffset: CGFloat
+    let content: () -> Content
+
+    var body: some View {
+        content()
+            .background(GeometryReader { geo -> Color in
+                DispatchQueue.main.async {
+                    self.scrollOffset = -geo.frame(in: .named("scrollView")).origin.y
+                }
+                return Color.clear
+            })
+            .coordinateSpace(name: "scrollView")
+    }
+}
+
+
+fileprivate extension String {
+    var trimming: String {
+        self.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+
+DeviceShakeView.swift
+---------------------
+import SwiftUI
+
+extension Notification.Name {
+    static let deviceDidShake = Notification.Name("deviceDidShake")
+}
+
+struct DeviceShakeView: UIViewRepresentable {
+    func makeUIView(context: Context) -> ShakeReportingView {
+        let view = ShakeReportingView()
+        return view
+    }
+
+    func updateUIView(_ uiView: ShakeReportingView, context: Context) {}
+
+    class ShakeReportingView: UIView {
+        override var canBecomeFirstResponder: Bool { true }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            becomeFirstResponder()
+        }
+
+        override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+            super.motionEnded(motion, with: event)
+            if motion == .motionShake {
+                NotificationCenter.default.post(name: .deviceDidShake, object: nil)
+            }
+        }
+    }
+}
+
+
+AppTheme.swift
+--------------
+// AppTheme.swift
+import SwiftUI
+
+struct AppTheme {
+    static let primaryColor = Color(red: 0.1, green: 0.25, blue: 0.7)
+    static let secondaryColor = Color(red: 0.98, green: 0.82, blue: 0.22) // spAccentYellow
+
+    static let backgroundColor = Color(UIColor.systemGroupedBackground)
+    static let cardBackgroundColor = Material.thin // Used for list items, flair boxes etc.
+    static let glassMaterialUltraThin = Material.ultraThinMaterial
+    static let glassMaterialThin = Material.thinMaterial
+    static let glassMaterialRegular = Material.regularMaterial
+
+    static let positiveColor = Color.green
+    static let negativeColor = Color.red
+    static let warningColor = Color.orange
+    static let infoColor = primaryColor
+
+    static let destructiveColor = Color.pink
+
+    static let spGradientStart = Color(red: 0.05, green: 0.5, blue: 0.55)
+    static let spGradientMid = primaryColor
+    static let spGradientEnd = Color(red: 0.5, green: 0.15, blue: 0.4)
+    
+    static let spContentBackground = Color(UIColor.systemBackground) // For text fields on dark bg etc.
+    static let spPrimaryText = Color(UIColor.label)
+    static let spSecondaryText = Color(UIColor.secondaryLabel)
+    static let spTertiaryText = Color(UIColor.tertiaryLabel)
+    static let spAccentYellow = secondaryColor
+    
+    static let glassBorder = Color.white.opacity(0.2)
+    static let glassBorderSubtle = Color.white.opacity(0.1)
+
+    static func userSpecificColor(for userID: String) -> Color {
+        let hash = abs(userID.hashValue)
+        let hue = Double(hash % 360) / 360.0
+        return Color(hue: hue, saturation: 0.85, brightness: 0.9) // Slightly adjusted
+    }
+}
+
+
+StreetPass_BLEManager.swift
+---------------------------
+// StreetPass_BLEManager.swift
+import Foundation
+import CoreBluetooth
+import Combine
+
+// THIS IS THE FIRST FIX
+@MainActor
+protocol StreetPassBLEManagerDelegate: AnyObject {
+    func bleManagerDidUpdateState(bluetoothState: CBManagerState)
+    func bleManagerDidReceiveCard(_ card: EncounterCard, rssi: NSNumber?)
+    func bleManagerDidUpdateLog(_ message: String)
+    func bleManagerDidEncounterError(_ error: StreetPassBLEError)
+}
+
+enum StreetPassBLEError: Error, LocalizedError {
+    case bluetoothUnavailable(String)
+    case dataSerializationError(String)
+    case dataDeserializationError(String)
+    case characteristicOperationFailed(String)
+    case connectionFailed(String)
+    case serviceSetupFailed(String)
+    case advertisingFailed(String)
+    case internalInconsistency(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .bluetoothUnavailable(let msg): return "Bluetooth Issue: \(msg)"
+        case .dataSerializationError(let msg): return "Data Encoding Error: \(msg)"
+        case .dataDeserializationError(let msg): return "Data Decoding Error: \(msg)"
+        case .characteristicOperationFailed(let msg): return "Bluetooth Characteristic Error: \(msg)"
+        case .connectionFailed(let msg): return "Peer Connection Failed: \(msg)"
+        case .serviceSetupFailed(let msg): return "Bluetooth Service Setup Failed: \(msg)"
+        case .advertisingFailed(let msg): return "Bluetooth Advertising Failed: \(msg)"
+        case .internalInconsistency(let msg): return "StreetPass System Error: \(msg)"
+        }
+    }
+}
+
+struct StreetPassBLE_UUIDs {
+    static let streetPassServiceUUID_String = "DEADBEEF-1234-5678-9ABC-DEF012345678" // // classic
+    static let encounterCardCharacteristicUUID_String = "CAFEF00D-0000-1111-2222-333344445555" // // also classic
+    static let streetPassServiceUUID = CBUUID(string: streetPassServiceUUID_String)
+    static let encounterCardCharacteristicUUID = CBUUID(string: encounterCardCharacteristicUUID_String)
+    static func allCharacteristicUUIDs() -> [CBUUID] {
+        return [encounterCardCharacteristicUUID]
+    }
+}
+
+fileprivate struct PeripheralCharacteristicPair: Hashable {
+    let peripheralID: UUID
+    let characteristicID: CBUUID
+}
+
+// For central sending chunks to peripheral
+fileprivate struct ChunkedWriteOperation {
+    let peripheralID: UUID
+    let characteristicID: CBUUID
+    let totalData: Data
+    var currentOffset: Int = 0
+    let chunkSize: Int // // this should be peripheral.maximumWriteValueLength
+
+    var hasMoreChunks: Bool {
+        return currentOffset < totalData.count
+    }
+
+    mutating func nextChunk() -> Data? {
+        guard hasMoreChunks else { return nil }
+        let end = min(currentOffset + chunkSize, totalData.count)
+        let chunk = totalData.subdata(in: currentOffset..<end)
+        currentOffset = end
+        return chunk
+    }
+
+    init(peripheralID: UUID, characteristicID: CBUUID, data: Data, chunkSize: Int = 100) { // default 100 is small, will be updated
+        self.peripheralID = peripheralID
+        self.characteristicID = characteristicID
+        self.totalData = data
+        self.chunkSize = chunkSize
+    }
+}
+
+// // NEW: For peripheral sending chunks via notifications
+fileprivate struct PeripheralChunkSendOperation {
+    let central: CBCentral // // need this to get maximumUpdateValueLength
+    let characteristicUUID: CBUUID // // should be encounterCardCharacteristicUUID
+    let totalData: Data
+    var currentOffset: Int = 0
+    // chunkSize determined by central.maximumUpdateValueLength
+
+    var hasMoreChunks: Bool {
+        return currentOffset < totalData.count
+    }
+
+    mutating func nextChunk() -> Data? {
+        guard hasMoreChunks else { return nil }
+        let chunkSizeForThisCentral = central.maximumUpdateValueLength // // crucial!
+        let end = min(currentOffset + chunkSizeForThisCentral, totalData.count)
+        let chunk = totalData.subdata(in: currentOffset..<end)
+        currentOffset = end
+        return chunk
+    }
+
+    init(central: CBCentral, characteristicUUID: CBUUID, data: Data) {
+        self.central = central
+        self.characteristicUUID = characteristicUUID
+        self.totalData = data
+    }
+}
+
+
+class StreetPassBLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralManagerDelegate, CBPeripheralDelegate {
+
+    weak var delegate: StreetPassBLEManagerDelegate?
+
+    @Published var isBluetoothPoweredOn: Bool = false
+    @Published var isScanning: Bool = false
+    @Published var isAdvertising: Bool = false
+    @Published var localUserCard: EncounterCard
+    @Published var receivedCards: [EncounterCard] = []
+    @Published var activityLog: [String] = []
+
+    private var centralManager: CBCentralManager!
+    private var peripheralManager: CBPeripheralManager!
+    private var connectingOrConnectedPeer: CBPeripheral?
+    private var peerRSSICache: [UUID: NSNumber] = [:]
+    private var encounterCardMutableCharacteristic: CBMutableCharacteristic?
+    private var subscribedCentrals: [CBCentral] = [] // // list of centrals subscribed to our characteristic
+
+    private let jsonEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        return encoder
+    }()
+
+    private let jsonDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { (decoder) -> Date in
+            let container = try decoder.singleValueContainer()
+            if let dateString = try? container.decode(String.self) {
+                let isoFormatters = [
+                    ISO8601DateFormatter(),
+                    { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f }(),
+                    { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f }(),
+                ]
+                for formatter in isoFormatters {
+                    if let date = formatter.date(from: dateString) { return date }
+                }
+                let commonFormatters = [
+                    { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSZZZZZ"; f.locale = Locale(identifier: "en_US_POSIX"); return f }(),
+                    { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssZZZZZ"; f.locale = Locale(identifier: "en_US_POSIX"); return f }(),
+                ]
+                for formatter in commonFormatters {
+                    if let date = (formatter as AnyObject).date(from: dateString) { return date } // // casting to anyobject for date(from:) ? tf???
+                }
+            }
+            if let timeInterval = try? container.decode(TimeInterval.self) {
+                return Date(timeIntervalSinceReferenceDate: timeInterval)
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date: not a recognized ISO8601 string or numeric timestamp.")
+        }
+        return decoder
+    }()
+    
+    private var lastEncounterTimeByUser: [String: Date] = [:]
+    private let encounterDebounceInterval: TimeInterval = 60 // // 1 min debounce
+    private let localUserCardStorageKey = "streetPass_LocalUserCard_v2"
+    private let receivedCardsStorageKey = "streetPass_ReceivedCards_v2"
+    
+    // Buffers for incoming data
+    private var incomingDataBuffers: [PeripheralCharacteristicPair: Data] = [:] // For central receiving data
+    private var incomingWriteBuffers: [UUID: Data] = [:] // // NEW: For peripheral receiving writes from central, keyed by central.identifier
+
+    // Outgoing data operations
+    private var currentChunkedWrite: ChunkedWriteOperation? // For central sending data
+    private var ongoingNotificationSends: [UUID: PeripheralChunkSendOperation] = [:] // // NEW: For peripheral sending notifications, keyed by central.identifier
+
+    init(userID: String) {
+        self.localUserCard = EncounterCard(userID: userID)
+        super.init()
+        log("blemanager: init - about to create centralmanager") // <--- new log
+        centralManager = CBCentralManager(delegate: self, queue: nil, options: [CBCentralManagerOptionShowPowerAlertKey: true])
+        log("blemanager: init - centralmanager created. about to create peripheralmanager") // <--- new log
+        peripheralManager = CBPeripheralManager(delegate: self, queue: nil, options: [CBPeripheralManagerOptionShowPowerAlertKey: true])
+        log("blemanager: init - peripheralmanager created.") // <--- new log
+        log("StreetPass BLE Manager initialized for UserID: \(userID). Waiting for Bluetooth power state.") // keep this one too
+        loadLocalUserCardFromPersistence()
+        loadReceivedCardsFromPersistence()
+    }
+    func log(_ message: String, level: LogLevel = .info) {
+        DispatchQueue.main.async {
+            let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+            let prefix: String
+            switch level {
+            case .error: prefix = "err! >" // // more aesthetic errors
+            case .warning: prefix = "warn >"
+            case .info: prefix = "info >"
+            }
+            let fullMessage = "\(timestamp) \(prefix) \(message)"
+            print("StreetPassBLE: \(fullMessage)")
+            self.activityLog.insert(fullMessage, at: 0)
+            if self.activityLog.count > 250 { // // keep log manageable
+                self.activityLog.removeLast(self.activityLog.count - 250)
+            }
+            self.delegate?.bleManagerDidUpdateLog(fullMessage)
+        }
+    }
+    enum LogLevel { case info, warning, error }
+
+    public func start() {
+        log("request to start streetpass services.") // lowercase
+        if let peer = connectingOrConnectedPeer {
+            log("start called, cancelling existing connection to \(String(describing: peer.identifier.uuidString.prefix(8)))", level: .warning)
+            centralManager.cancelPeripheralConnection(peer)
+            connectingOrConnectedPeer = nil
+        }
+        if centralManager.state == .poweredOn { startScanning() }
+        else { log("central manager not powered on. scan deferred.", level: .warning) } // lowercase
+        if peripheralManager.state == .poweredOn { setupServiceAndStartAdvertising() }
+        else { log("peripheral manager not powered on. advertising deferred.", level: .warning) } // lowercase
+    }
+
+    public func stop() {
+        log("request to stop streetpass services.") // lowercase
+        stopScanning()
+        stopAdvertising()
+        if let peer = connectingOrConnectedPeer {
+            log("stop called, cancelling active connection to peer: \(String(describing: peer.identifier.uuidString.prefix(8)))")
+            centralManager.cancelPeripheralConnection(peer)
+            connectingOrConnectedPeer = nil
+        }
+        // // clear ongoing sends too
+        ongoingNotificationSends.removeAll()
+        currentChunkedWrite = nil
+    }
+
+    public func updateLocalUserCard(newCard: EncounterCard) {
+        guard newCard.userID == self.localUserCard.userID else {
+            log("Critical error: Attempt to update card with mismatched UserID. Current: \(self.localUserCard.userID), New: \(newCard.userID)", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.internalInconsistency("UserID mismatch during card update.")) }
+            return
+        }
+        let contentActuallyChanged = self.localUserCard.isContentDifferent(from: newCard)
+        self.localUserCard = newCard
+        if contentActuallyChanged || self.localUserCard.id == EncounterCard(userID: self.localUserCard.userID).id { // // what is this id comparison for?
+            self.localUserCard.id = UUID()
+        }
+        self.localUserCard.lastUpdated = Date()
+        log("Local user card updated. DisplayName: '\(self.localUserCard.displayName)'. NewID: \(self.localUserCard.id). Drawing size: \(self.localUserCard.drawingData?.count ?? 0) bytes. Content changed: \(contentActuallyChanged).")
+        saveLocalUserCardToPersistence()
+        
+        // // update characteristic value and notify subscribers IF advertising and char exists
+        if isAdvertising, let characteristic = self.encounterCardMutableCharacteristic {
+            do {
+                let cardData = try jsonEncoder.encode(self.localUserCard)
+                characteristic.value = cardData // // this might be too large for a single value, but iOS handles reads in chunks. For notifications, we now handle it.
+                log("Updated characteristic value in peripheral for reads. Size: \(cardData.count) bytes.")
+                
+                // // NEW: Initiate/update chunked send for all subscribed centrals
+                if !subscribedCentrals.isEmpty {
+                    log("triggering chunked notification send to \(subscribedCentrals.count) central(s) for local card update...")
+                    for central in subscribedCentrals {
+                        ongoingNotificationSends[central.identifier] = PeripheralChunkSendOperation(
+                            central: central,
+                            characteristicUUID: characteristic.uuid,
+                            data: cardData
+                        )
+                        attemptToSendNextNotificationChunk(for: central.identifier)
+                    }
+                }
+            } catch {
+                let errorMsg = "Encoding local card for characteristic update/notification failed: \(error.localizedDescription)"
+                log(errorMsg, level: .error)
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
+            }
+        }
+        objectWillChange.send()
+    }
+    
+    // // NEW: Helper to send notification chunks
+    private func attemptToSendNextNotificationChunk(for centralIdentifier: UUID) {
+        guard var sendOperation = ongoingNotificationSends[centralIdentifier],
+              let characteristic = self.encounterCardMutableCharacteristic else {
+            // log("no ongoing notification send for central \(centralIdentifier) or char missing.", level: .info) // too noisy
+            ongoingNotificationSends.removeValue(forKey: centralIdentifier)
+            return
+        }
+
+        guard sendOperation.hasMoreChunks else {
+            log("all notification chunks sent to central \(String(centralIdentifier.uuidString.prefix(8))). operation complete.", level: .info)
+            ongoingNotificationSends.removeValue(forKey: centralIdentifier)
+            return
+        }
+
+        if let chunk = sendOperation.nextChunk() {
+            log("peripheral: sending notify chunk (\(chunk.count) bytes, offset \(sendOperation.currentOffset - chunk.count)) to central \(String(centralIdentifier.uuidString.prefix(8))).")
+            let success = peripheralManager.updateValue(chunk, for: characteristic, onSubscribedCentrals: [sendOperation.central])
+            
+            if success {
+                ongoingNotificationSends[centralIdentifier] = sendOperation // // update offset in stored operation
+                if sendOperation.hasMoreChunks {
+                    // // yield to main thread to prevent recursion depth / blocking, and to allow isReadyToUpdateSubscribers to take over if needed
+                    DispatchQueue.main.async {
+                        self.attemptToSendNextNotificationChunk(for: centralIdentifier)
+                    }
+                } else {
+                    log("peripheral: finished sending all notification chunks to central \(String(centralIdentifier.uuidString.prefix(8))).")
+                    ongoingNotificationSends.removeValue(forKey: centralIdentifier)
+                }
+            } else {
+                log("peripheral: updatevalue returned false for central \(String(centralIdentifier.uuidString.prefix(8))). will retry on isreadytoupdatesubscribers.", level: .warning)
+                // // Don't remove the operation, peripheralManagerIsReady(toUpdateSubscribers:) will retry.
+                // // The offset in sendOperation is not advanced here, so it will resend the same chunk.
+            }
+        } else { // // should be caught by hasMoreChunks guard
+             log("peripheral: no more chunks (or chunk gen failed) for central \(String(centralIdentifier.uuidString.prefix(8))).", level: .warning)
+             ongoingNotificationSends.removeValue(forKey: centralIdentifier)
+        }
+    }
+
+
+    private func startScanning() {
+        guard centralManager.state == .poweredOn else {
+            log("Central: Bluetooth not powered on. Scan deferred.", level: .warning); return
+        }
+        if isScanning { log("Central: Already scanning."); return }
+        log("Central: Starting scan for StreetPass service: \(StreetPassBLE_UUIDs.streetPassServiceUUID.uuidString)")
+        centralManager.scanForPeripherals(withServices: [StreetPassBLE_UUIDs.streetPassServiceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) // // allow dupes for rssi updates
+        DispatchQueue.main.async { self.isScanning = true }
+    }
+
+    private func stopScanning() {
+        if centralManager.isScanning { centralManager.stopScan(); log("Central: Scanning stopped.") }
+        DispatchQueue.main.async { self.isScanning = false }
+    }
+
+    private func setupServiceAndStartAdvertising() {
+        log("blemanager: setupserviceandstartadvertising CALLED. current state: \(peripheralManager.state.rawValue)") // <--- new log
+        guard peripheralManager.state == .poweredOn else {
+            log("Peripheral: Bluetooth not powered on. Service setup deferred.", level: .warning); return
+        }
+        if encounterCardMutableCharacteristic != nil && peripheralManager.isAdvertising {
+             log("Peripheral: Service likely configured and already advertising.")
+             return
+        }
+        if encounterCardMutableCharacteristic != nil && !peripheralManager.isAdvertising {
+             log("Peripheral: Service likely configured, but not advertising. Starting advertising...")
+             actuallyStartAdvertising() // // just start it
+             return
+        }
+        log("Peripheral: Setting up Encounter Card service...")
+        encounterCardMutableCharacteristic = CBMutableCharacteristic( // // this is THE characteristic
+            type: StreetPassBLE_UUIDs.encounterCardCharacteristicUUID,
+            properties: [.read, .write, .notify], // // can read, write, and get notified
+            value: nil, // // initial value set later or on read
+            permissions: [.readable, .writeable] // // app can read and write it
+        )
+        let service = CBMutableService(type: StreetPassBLE_UUIDs.streetPassServiceUUID, primary: true)
+        service.characteristics = [encounterCardMutableCharacteristic!]
+        peripheralManager.removeAllServices() // // clean slate
+        log("Peripheral: Adding service \(service.uuid.uuidString)...")
+        peripheralManager.add(service) // // this is async, wait for didAdd
+    }
+    
+    private func actuallyStartAdvertising() {
+        log("blemanager: actuallystartadvertising CALLED. isadvertising already? \(isAdvertising)") // <--- new log
+        if isAdvertising { log("Peripheral: Already advertising or start attempt in progress.", level: .info); return }
+        let advertisementData: [String: Any] = [CBAdvertisementDataServiceUUIDsKey: [StreetPassBLE_UUIDs.streetPassServiceUUID]]
+
+        log("Peripheral: Starting advertising with data: \(advertisementData)")
+        peripheralManager.startAdvertising(advertisementData) // // also async
+    }
+
+    private func stopAdvertising() {
+        if peripheralManager.isAdvertising { peripheralManager.stopAdvertising(); log("Peripheral: Advertising stopped.") }
+        DispatchQueue.main.async { self.isAdvertising = false }
+        ongoingNotificationSends.removeAll() // // stop any pending sends
+    }
+    
+    private func processAndStoreReceivedCard(_ card: EncounterCard, rssi: NSNumber?) {
+        let now = Date()
+        if let lastTime = lastEncounterTimeByUser[card.userID], now.timeIntervalSince(lastTime) < encounterDebounceInterval {
+            log("Debounced: Card from UserID '\(card.userID)' (Name: \(card.displayName)) received again within \(encounterDebounceInterval)s. Last: \(formatTimestampForLog(lastTime)). Ignoring.", level: .info)
+            return // // too soon, junior
+        }
+        DispatchQueue.main.async { // // ui updates on main thread
+            var cardUpdatedInList = false
+            if let index = self.receivedCards.firstIndex(where: { $0.userID == card.userID }) {
+                // // card exists, check if newer
+                if card.lastUpdated > self.receivedCards[index].lastUpdated || card.cardSchemaVersion > self.receivedCards[index].cardSchemaVersion {
+                    self.receivedCards[index] = card // // update it
+                    cardUpdatedInList = true
+                    self.log("Updated card for UserID: '\(card.userID)' (Name: \(card.displayName)). Drawing: \(card.drawingData != nil).")
+                } else {
+                    self.log("Received card for UserID: '\(card.userID)' (Name: \(card.displayName)) is not newer. No UI update made. Drawing: \(card.drawingData != nil).")
+                    self.lastEncounterTimeByUser[card.userID] = now // // still update debounce time
+                    return
+                }
+            } else {
+                // // new card
+                self.receivedCards.append(card)
+                cardUpdatedInList = true
+                self.log("Added new card from UserID: '\(card.userID)' (Name: \(card.displayName)). Drawing: \(card.drawingData != nil).")
+            }
+            if cardUpdatedInList {
+                self.receivedCards.sort(by: { $0.lastUpdated > $1.lastUpdated }) // // keep sorted
+                self.saveReceivedCardsToPersistence()
+                self.lastEncounterTimeByUser[card.userID] = now
+                self.delegate?.bleManagerDidReceiveCard(card, rssi: rssi) // // notify delegate (viewmodel)
+            }
+        }
+    }
+
+    private func formatTimestampForLog(_ date: Date) -> String {
+        let formatter = DateFormatter(); formatter.dateFormat = "HH:mm:ss.SSS"; return formatter.string(from: date)
+    }
+
+    // MARK: - Persistence
+    func loadLocalUserCardFromPersistence() {
+        log("Loading local user card from persistence...")
+        guard let data = UserDefaults.standard.data(forKey: localUserCardStorageKey) else {
+            log("No local user card found in persistence. Saving current default/newly initialized card.")
+            saveLocalUserCardToPersistence(); return
+        }
+        do {
+            var loadedCard = try jsonDecoder.decode(EncounterCard.self, from: data)
+            if loadedCard.userID == self.localUserCard.userID { // // check if it's for current app user
+                if loadedCard.cardSchemaVersion < EncounterCard(userID: self.localUserCard.userID).cardSchemaVersion {
+                    log("Loaded card schema (\(loadedCard.cardSchemaVersion)) is older. Updating to current schema (\(EncounterCard(userID: self.localUserCard.userID).cardSchemaVersion)).", level: .warning)
+                    // // migration logic could go here if fields changed
+                    loadedCard.cardSchemaVersion = EncounterCard(userID: self.localUserCard.userID).cardSchemaVersion
+                }
+                self.localUserCard = loadedCard
+                log("Successfully loaded local user card: '\(self.localUserCard.displayName)'. Schema: v\(self.localUserCard.cardSchemaVersion). Drawing: \(self.localUserCard.drawingData != nil)")
+            } else {
+                log("Persisted card UserID (\(loadedCard.userID)) MISMATCHES current (\(self.localUserCard.userID)). Resetting.", level: .error)
+                // // this should ideally not happen if userID is persistent per device install
+                self.localUserCard = EncounterCard(userID: self.localUserCard.userID) // // reset to default for this user
+                saveLocalUserCardToPersistence()
+            }
+        } catch {
+            let errorMsg = "Decoding local user card failed: \(error.localizedDescription). Using default and resaving."
+            log(errorMsg, level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError(errorMsg)) }
+            self.localUserCard = EncounterCard(userID: self.localUserCard.userID) // // fallback to default
+            saveLocalUserCardToPersistence()
+        }
+        DispatchQueue.main.async { self.objectWillChange.send() } // // tell swiftui
+    }
+
+    private func saveLocalUserCardToPersistence() {
+        do {
+            let cardData = try jsonEncoder.encode(localUserCard)
+            UserDefaults.standard.set(cardData, forKey: localUserCardStorageKey)
+            log("Saved local user card ('\(localUserCard.displayName)', ID: \(String(localUserCard.id.uuidString.prefix(8)))) to UserDefaults. Size: \(cardData.count) bytes.")
+        } catch {
+            let errorMsg = "Encoding local user card for persistence failed: \(error.localizedDescription)"; log(errorMsg, level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
+        }
+    }
+
+    private func loadReceivedCardsFromPersistence() {
+        log("Loading received cards from persistence...")
+        guard let data = UserDefaults.standard.data(forKey: receivedCardsStorageKey) else {
+            log("No received cards found in persistence."); self.receivedCards = []; return
+        }
+        do {
+            let loadedCards = try jsonDecoder.decode([EncounterCard].self, from: data)
+            self.receivedCards = loadedCards.sorted(by: { $0.lastUpdated > $1.lastUpdated }) // // sort again just in case
+            log("Loaded \(self.receivedCards.count) received cards from persistence.")
+            // // repopulate debounce timer for loaded cards
+            for card in self.receivedCards { self.lastEncounterTimeByUser[card.userID] = card.lastUpdated }
+        } catch {
+            let errorMsg = "Decoding received cards failed: \(error.localizedDescription). Clearing cache."; log(errorMsg, level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError(errorMsg)) }
+            self.receivedCards = []
+        }
+        DispatchQueue.main.async { self.objectWillChange.send() }
+    }
+
+    private func saveReceivedCardsToPersistence() {
+        let maxReceivedCardsToSave = 50 // // don't let it grow infinitely
+        let cardsToSave = Array(receivedCards.prefix(maxReceivedCardsToSave))
+        do {
+            let receivedData = try jsonEncoder.encode(cardsToSave)
+            UserDefaults.standard.set(receivedData, forKey: receivedCardsStorageKey)
+            log("Saved \(cardsToSave.count) received cards to UserDefaults. Size: \(receivedData.count) bytes.")
+        } catch {
+            let errorMsg = "Encoding received cards failed: \(error.localizedDescription)"; log(errorMsg, level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
+        }
+    }
+    
+    public func clearReceivedCardsFromPersistence() {
+        DispatchQueue.main.async {
+            self.receivedCards.removeAll(); self.lastEncounterTimeByUser.removeAll()
+            UserDefaults.standard.removeObject(forKey: self.receivedCardsStorageKey)
+            self.log("All received cards and debounce history cleared.", level: .info)
+            self.objectWillChange.send()
+        }
+    }
+    
+    // MARK: - Central Role: Sending Data (Writing to Peer)
+    private func attemptCardTransmissionToPeer(peripheral: CBPeripheral, characteristic: CBCharacteristic) {
+        guard characteristic.properties.contains(.write) || characteristic.properties.contains(.writeWithoutResponse) else {
+            log("Central: Peer's CardData char (\(String(characteristic.uuid.uuidString.prefix(8)))) no-write. No send.", level: .warning); return
+        }
+        if let activeWrite = currentChunkedWrite, activeWrite.peripheralID == peripheral.identifier, activeWrite.characteristicID == characteristic.uuid {
+            log("Central: Chunked write already in progress for \(String(characteristic.uuid.uuidString.prefix(8))) on \(String(peripheral.identifier.uuidString.prefix(8))). Ignoring new request.", level: .warning)
+            return // // already sending to this guy
+        }
+        log("Central: Prep send our card to Peer: '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))'.")
+        do {
+            var cardToSend = self.localUserCard; cardToSend.lastUpdated = Date() // // always fresh timestamp
+            let cardData = try jsonEncoder.encode(cardToSend)
+            let writeType: CBCharacteristicWriteType = characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
+            
+            let maxSingleWriteSize = peripheral.maximumWriteValueLength(for: writeType) // // important!
+            log("Central: Max write value for peer \(String(peripheral.identifier.uuidString.prefix(8))) is \(maxSingleWriteSize) for type \(writeType == .withResponse ? "Resp" : "NoResp"). Card size: \(cardData.count).")
+
+            // // always use withResponse if available for chunking, it's more reliable
+            let actualWriteTypeForChunking = characteristic.properties.contains(.write) ? CBCharacteristicWriteType.withResponse : CBCharacteristicWriteType.withoutResponse
+            let chunkSizeForWriting = peripheral.maximumWriteValueLength(for: actualWriteTypeForChunking)
+
+            if cardData.count > chunkSizeForWriting { // // if card is bigger than what peripheral can take in one go
+                log("Central: Card data (\(cardData.count) bytes) is large. Initiating CHUNKED WRITE. Max chunk: \(chunkSizeForWriting) bytes. Type: \(actualWriteTypeForChunking == .withResponse ? "Resp" : "NoResp")")
+                currentChunkedWrite = ChunkedWriteOperation(
+                    peripheralID: peripheral.identifier,
+                    characteristicID: characteristic.uuid,
+                    data: cardData,
+                    chunkSize: chunkSizeForWriting // // use the actual max size
+                )
+                sendNextChunk(peripheral: peripheral, characteristic: characteristic, writeType: actualWriteTypeForChunking)
+            } else {
+                // // small enough for one shot
+                log("Central: Writing our card (\(cardData.count) bytes) in ONE SHOT to \(String(characteristic.uuid.uuidString.prefix(8))) type \(writeType == .withResponse ? "Resp" : "NoResp").")
+                currentChunkedWrite = nil // // no chunk op needed
+                peripheral.writeValue(cardData, for: characteristic, type: writeType) // // use original preferred write type
+                 if writeType == .withoutResponse {
+                    log("Central: Sent card with .withoutResponse. Assuming success (no callback).")
+                    // // might wanna disconnect here or wait a bit then disconnect if this is the end of interaction
+                }
+            }
+        } catch {
+            let errorMsg = "Encoding local card for transmission failed: \(error.localizedDescription)"; log(errorMsg, level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError(errorMsg)) }
+            currentChunkedWrite = nil // // clear op on error
+        }
+    }
+
+    private func sendNextChunk(peripheral: CBPeripheral, characteristic: CBCharacteristic, writeType: CBCharacteristicWriteType) {
+        guard var writeOp = currentChunkedWrite, // // make it var to update offset
+              writeOp.peripheralID == peripheral.identifier,
+              writeOp.characteristicID == characteristic.uuid else {
+            log("Central: No active chunked write operation or mismatch. Aborting sendNextChunk.", level: .warning)
+            currentChunkedWrite = nil; return
+        }
+        if let chunk = writeOp.nextChunk() { // // this advances offset in writeOp
+            currentChunkedWrite = writeOp // // store mutated op back
+            log("Central: Sending chunk \((writeOp.currentOffset / writeOp.chunkSize) + (writeOp.currentOffset % writeOp.chunkSize == 0 ? 0 : 1)) of \((writeOp.totalData.count + writeOp.chunkSize - 1) / writeOp.chunkSize). Offset: \(writeOp.currentOffset - chunk.count), Size: \(chunk.count) bytes. Type: \(writeType == .withResponse ? "Resp" : "NoResp").")
+            peripheral.writeValue(chunk, for: characteristic, type: writeType) // // use specified write type
+            if writeType == .withoutResponse && !writeOp.hasMoreChunks { // // if no response and it was the last chunk
+                 log("Central: Last chunk sent with .withoutResponse. Assuming success for operation.")
+                 currentChunkedWrite = nil // // operation complete
+            }
+        } else {
+            log("Central: All chunks sent successfully for write operation to \(String(characteristic.uuid.uuidString.prefix(8))) on \(String(peripheral.identifier.uuidString.prefix(8))).")
+            currentChunkedWrite = nil // // operation complete
+            // // if writeType was .withResponse, didWriteValueFor will confirm the last one.
+            // // if it was .withoutResponse, we assume it's done here.
+        }
+    }
+
+    // MARK: - CBCentralManagerDelegate
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        DispatchQueue.main.async {
+            self.isBluetoothPoweredOn = (central.state == .poweredOn)
+            self.delegate?.bleManagerDidUpdateState(bluetoothState: central.state)
+        }
+        switch central.state {
+        case .poweredOn: log("Central Manager: Bluetooth ON."); startScanning()
+        case .poweredOff:
+            log("Central Manager: Bluetooth OFF.", level: .warning)
+            DispatchQueue.main.async {
+                self.isScanning = false
+                self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT Off (Central)"))
+            }
+            if let peer = connectingOrConnectedPeer { log("Central: BT off, cancel connect to \(String(peer.identifier.uuidString.prefix(8)))", level: .warning); centralManager.cancelPeripheralConnection(peer); connectingOrConnectedPeer = nil; currentChunkedWrite = nil }
+        case .unauthorized:
+            log("Central Manager: BT unauthorized.", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT permissions not granted.")) }
+        case .unsupported:
+            log("Central Manager: BT unsupported.", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT LE not supported.")) }
+        case .resetting: log("Central Manager: BT resetting.", level: .warning); if let peer = connectingOrConnectedPeer { centralManager.cancelPeripheralConnection(peer); connectingOrConnectedPeer = nil; currentChunkedWrite = nil }
+        case .unknown: log("Central Manager: BT state unknown.", level: .warning)
+        @unknown default: log("Central Manager: Unhandled BT state \(central.state.rawValue)", level: .warning)
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        let name = peripheral.name ?? "Unknown Device"
+        log("Central: Discovered '\(name)' (RSSI: \(RSSI.intValue)). ID: ...\(String(peripheral.identifier.uuidString.suffix(6)))")
+        peerRSSICache[peripheral.identifier] = RSSI
+        if connectingOrConnectedPeer == nil { // // if not already busy
+            log("Central: Attempting connect to '\(name)' (ID: \(String(peripheral.identifier.uuidString.prefix(8))))...")
+            connectingOrConnectedPeer = peripheral // // mark as busy with this one
+            centralManager.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
+        } else {
+            if connectingOrConnectedPeer?.identifier != peripheral.identifier { // // busy with someone else
+                 log("Central: Busy with \(String(describing: connectingOrConnectedPeer!.identifier.uuidString.prefix(8))) (\(connectingOrConnectedPeer?.name ?? "N/A")). Ignoring diff peer '\(name)'.", level: .info)
+            }
+            // // if it's the same peer we are trying to connect to, this is just a rescan, ignore.
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        log("Central: Connected to '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))'. Discovering services...")
+        guard peripheral.identifier == connectingOrConnectedPeer?.identifier else {
+            log("Central: Connected UNEXPECTED peripheral (\(String(peripheral.identifier.uuidString.prefix(8)))) vs \(String(describing: connectingOrConnectedPeer?.identifier.uuidString.prefix(8))). Disconnecting.", level: .warning)
+            central.cancelPeripheralConnection(peripheral)
+            // // do not clear connectingOrConnectedPeer here, might be a race. Let didDisconnect handle it.
+            return
+        }
+        peripheral.delegate = self // // i am your delegate now
+        peripheral.discoverServices([StreetPassBLE_UUIDs.streetPassServiceUUID])
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        let name = peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8))
+        let errStr = error?.localizedDescription ?? "unknown reason"
+        log("Central: Fail connect to '\(name)'. Error: \(errStr)", level: .error)
+        if connectingOrConnectedPeer?.identifier == peripheral.identifier { connectingOrConnectedPeer = nil; currentChunkedWrite = nil } // // no longer busy with this one
+        DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.connectionFailed("Connect to '\(name)' fail: \(errStr)")) }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        let name = peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8))
+        let peerID = peripheral.identifier
+        if let err = error {
+            log("Central: Disconnected '\(name)' (ID: \(String(peerID.uuidString.prefix(8)))) error: \(err.localizedDescription)", level: .warning)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.connectionFailed("Disconnect '\(name)': \(err.localizedDescription)")) }
+        } else { log("Central: Disconnected clean '\(name)' (ID: \(String(peerID.uuidString.prefix(8)))).") }
+        
+        // // Clean up resources associated with this peripheral
+        for charUUID in StreetPassBLE_UUIDs.allCharacteristicUUIDs() {
+            let bufferKey = PeripheralCharacteristicPair(peripheralID: peerID, characteristicID: charUUID)
+            if incomingDataBuffers.removeValue(forKey: bufferKey) != nil { log("Central: Clear buffer \(name)/char \(String(charUUID.uuidString.prefix(8))) disconnect.") }
+        }
+        if currentChunkedWrite?.peripheralID == peerID {
+            log("Central: Clearing active chunked write operation for disconnected peripheral \(name).", level: .warning)
+            currentChunkedWrite = nil
+        }
+        if connectingOrConnectedPeer?.identifier == peerID { connectingOrConnectedPeer = nil } // // no longer busy
+        peerRSSICache.removeValue(forKey: peerID)
+    }
+
+    // MARK: - CBPeripheralDelegate (Central Role)
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard peripheral.identifier == connectingOrConnectedPeer?.identifier else {
+            log("Central/PeerDelegate: Service discovery from unexpected peripheral \(String(peripheral.identifier.uuidString.prefix(8))). Ignored.", level: .warning); return }
+        if let err = error {
+            log("Central/PeerDelegate: Error discovering services on '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))': \(err.localizedDescription)", level: .error)
+            centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil; // let didDisconnect handle this
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.serviceSetupFailed("Svc discovery peer fail: \(err.localizedDescription)")) }
+            return
+        }
+        guard let service = peripheral.services?.first(where: { $0.uuid == StreetPassBLE_UUIDs.streetPassServiceUUID }) else {
+            log("Central/PeerDelegate: StreetPass service (\(StreetPassBLE_UUIDs.streetPassServiceUUID.uuidString)) NOT FOUND on '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))'. Disconnecting.", level: .warning)
+            centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.serviceSetupFailed("StreetPass svc not found peer.")) }
+            return
+        }
+        log("Central/PeerDelegate: Found StreetPass service on '\(peripheral.name ?? String(peripheral.identifier.uuidString.prefix(8)))'. Discovering EncounterCard char...")
+        peripheral.discoverCharacteristics([StreetPassBLE_UUIDs.encounterCardCharacteristicUUID], for: service)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard peripheral.identifier == connectingOrConnectedPeer?.identifier else {
+            log("Central/PeerDelegate: Char discovery from unexpected peripheral \(String(peripheral.identifier.uuidString.prefix(8))). Ignored.", level: .warning); return }
+        if service.uuid != StreetPassBLE_UUIDs.streetPassServiceUUID {
+            log("Central/PeerDelegate: Chars discovered for unexpected service \(service.uuid) on \(String(describing: peripheral.name)).", level: .warning); return }
+        if let err = error {
+            log("Central/PeerDelegate: Error discovering chars for svc \(String(service.uuid.uuidString.prefix(8))) on '\(peripheral.name ?? "")': \(err.localizedDescription)", level: .error)
+            centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Char discovery fail: \(err.localizedDescription)")) }
+            return
+        }
+        guard let cardChar = service.characteristics?.first(where: { $0.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID }) else {
+            log("Central/PeerDelegate: EncounterCard char (\(StreetPassBLE_UUIDs.encounterCardCharacteristicUUID.uuidString)) NOT FOUND in svc \(String(service.uuid.uuidString.prefix(8))). Disconnecting.", level: .warning)
+            centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("EncounterCard char not found peer.")) }
+            return
+        }
+        log("Central/PeerDelegate: Found EncounterCard characteristic. UUID: \(String(cardChar.uuid.uuidString.prefix(8))). Properties: \(cardChar.properties.description)")
+        
+        // Exchange logic: 1. Subscribe (if notify), 2. Read (if no notify but read), 3. Write our card
+        if cardChar.properties.contains(.notify) {
+            log("Central/PeerDelegate: Char supports Notify. Subscribing...")
+            peripheral.setNotifyValue(true, for: cardChar)
+        } else if cardChar.properties.contains(.read) {
+            log("Central/PeerDelegate: Char no Notify, but supports Read. Reading...", level: .info)
+            peripheral.readValue(for: cardChar)
+            log("Central/PeerDelegate: Attempting to send our card after initiating read...")
+            attemptCardTransmissionToPeer(peripheral: peripheral, characteristic: cardChar)
+        } else {
+            log("Central/PeerDelegate: EncounterCard char no Notify/Read. Cannot receive their card. Still attempting to send ours.", level: .warning)
+            if cardChar.properties.contains(.write) || cardChar.properties.contains(.writeWithoutResponse) {
+                attemptCardTransmissionToPeer(peripheral: peripheral, characteristic: cardChar)
+            } else {
+                 log("Central/PeerDelegate: EncounterCard char also not writable. Full exchange impossible. Disconnecting.", level: .error)
+                 centralManager.cancelPeripheralConnection(peripheral)
+                 DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Peer card char unusable (no read/notify/write).")) }
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard peripheral.identifier == connectingOrConnectedPeer?.identifier && characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID else {
+             log("Central/PeerDelegate: Notify state update for unexpected char/peripheral. Char: \(String(characteristic.uuid.uuidString.prefix(8))) on \(String(peripheral.identifier.uuidString.prefix(8))). Ignored.", level: .warning); return }
+        if let err = error {
+            log("Central/PeerDelegate: Error changing notify state CardData on \(String(describing: peripheral.name)): \(err.localizedDescription)", level: .error)
+            centralManager.cancelPeripheralConnection(peripheral); // connectingOrConnectedPeer = nil;
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Subscribe peer card fail: \(err.localizedDescription)")) }
+            return
+        }
+        if characteristic.isNotifying {
+            log("Central/PeerDelegate: SUBSCRIBED to peer card notify (\(String(characteristic.uuid.uuidString.prefix(8)))).")
+            log("Central/PeerDelegate: Sending our card to peer after subscribe/simultaneously with read...")
+            attemptCardTransmissionToPeer(peripheral: peripheral, characteristic: characteristic)
+        } else {
+            log("Central/PeerDelegate: UNSUBSCRIBED from peer card notify (\(String(characteristic.uuid.uuidString.prefix(8)))).", level: .info)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let activeWriteOp = currentChunkedWrite,
+           activeWriteOp.peripheralID == peripheral.identifier,
+           activeWriteOp.characteristicID == characteristic.uuid {
+            if let err = error {
+                log("Central/PeerDelegate: Error WRITING CHUNK to peer \(String(describing: peripheral.name)): \(err.localizedDescription)", level: .error)
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Chunk write to peer fail: \(err.localizedDescription)")) }
+                currentChunkedWrite = nil
+                return
+            }
+            log("Central/PeerDelegate: Successfully WROTE CHUNK (offset now \(activeWriteOp.currentOffset)) to peer \(String(describing: peripheral.name)).")
+            sendNextChunk(peripheral: peripheral, characteristic: characteristic, writeType: .withResponse)
+        } else {
+            guard peripheral.identifier == connectingOrConnectedPeer?.identifier && characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID else {
+                log("Central/PeerDelegate: Write resp for unexpected char/peripheral (not chunked). Char: \(String(characteristic.uuid.uuidString.prefix(8))) on \(String(peripheral.identifier.uuidString.prefix(8))). Ignored.", level: .warning); return
+            }
+            if let err = error {
+                log("Central/PeerDelegate: Error WRITING (single) our card to peer \(String(describing: peripheral.name)): \(err.localizedDescription)", level: .error)
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Write local card to peer fail: \(err.localizedDescription)")) }
+            } else {
+                log("Central/PeerDelegate: Successfully WROTE (single) our card to peer \(String(describing: peripheral.name)).")
+            }
+        }
+    }
+    
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard connectingOrConnectedPeer?.identifier == peripheral.identifier else {
+            log("Central/PeerDelegate: Value update from unexpected peripheral \(String(peripheral.identifier.uuidString.prefix(8))). Ignored.", level: .warning); return }
+        
+        let bufferKey = PeripheralCharacteristicPair(peripheralID: peripheral.identifier, characteristicID: characteristic.uuid)
+        
+        if characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID {
+            if let err = error {
+                log("Central/PeerDelegate: Error char VALUE UPDATE \(String(characteristic.uuid.uuidString.prefix(8))): \(err.localizedDescription)", level: .error)
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.characteristicOperationFailed("Receive value peer char fail: \(err.localizedDescription)")) }
+                incomingDataBuffers[bufferKey] = nil;
+                return
+            }
+            guard let newDataChunk = characteristic.value else {
+                log("Central/PeerDelegate: NIL data CardData from \(String(peripheral.identifier.uuidString.prefix(8))).", level: .warning); return }
+            
+            log("Central/PeerDelegate: CHUNK (\(newDataChunk.count) bytes) for \(String(bufferKey.characteristicID.uuidString.prefix(8))) from \(String(bufferKey.peripheralID.uuidString.prefix(8))).")
+            
+            var currentBuffer = incomingDataBuffers[bufferKey, default: Data()]
+            currentBuffer.append(newDataChunk)
+            incomingDataBuffers[bufferKey] = currentBuffer
+            log("Central/PeerDelegate: Accumulated buffer for \(String(bufferKey.peripheralID.uuidString.prefix(8))) is now \(currentBuffer.count) bytes.")
+
+            do {
+                let receivedCard = try jsonDecoder.decode(EncounterCard.self, from: currentBuffer)
+                log("Central/PeerDelegate: DECODED card from '\(receivedCard.displayName)'. Size: \(currentBuffer.count). Drawing: \(receivedCard.drawingData != nil).")
+                let rssi = peerRSSICache[peripheral.identifier]; processAndStoreReceivedCard(receivedCard, rssi: rssi)
+                incomingDataBuffers[bufferKey] = nil
+                
+                if currentChunkedWrite == nil {
+                    log("Central/PeerDelegate: Card exchange complete (received theirs, already sent ours or not sending). Disconnecting '\(peripheral.name ?? "")'.")
+                    centralManager.cancelPeripheralConnection(peripheral);
+                } else {
+                    log("Central/PeerDelegate: Received their card, but still sending ours. Waiting for our send to complete.")
+                }
+
+            } catch let decodingError as DecodingError {
+                 switch decodingError {
+                 case .dataCorrupted(let context):
+                     log("Central/PeerDelegate: Data CORRUPTED \(String(bufferKey.peripheralID.uuidString.prefix(8))). Buffer: \(currentBuffer.count). Context: \(context.debugDescription). Path: \(context.codingPath)", level: .error); log("Central/PeerDelegate: Snippet: \(String(data: currentBuffer.prefix(500), encoding: .utf8) ?? "Non-UTF8")")
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Data corrupted: \(context.debugDescription)")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                 case .keyNotFound(let key, let context):
+                     log("Central/PeerDelegate: Key '\(key.stringValue)' NOT FOUND \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Missing key '\(key.stringValue)'.")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                 case .typeMismatch(let type, let context):
+                     log("Central/PeerDelegate: Type MISMATCH '\(context.codingPath.last?.stringValue ?? "uk")' (exp \(type)) \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Type mismatch key '\(context.codingPath.last?.stringValue ?? "")': \(context.debugDescription).")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                 case .valueNotFound(let type, let context):
+                     log("Central/PeerDelegate: Value NOT FOUND type \(type) key '\(context.codingPath.last?.stringValue ?? "uk")' \(String(bufferKey.peripheralID.uuidString.prefix(8))). Context: \(context.debugDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Value not found key '\(context.codingPath.last?.stringValue ?? "")': \(context.debugDescription).")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                 @unknown default:
+                     log("Central/PeerDelegate: Unknown decode error \(String(bufferKey.peripheralID.uuidString.prefix(8))). Error: \(decodingError.localizedDescription)", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Unknown decode error: \(decodingError.localizedDescription)")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                 }
+                 if case .dataCorrupted = decodingError { /* Handled */ }
+                 else if currentBuffer.count < 65535 {
+                     log("Central/PeerDelegate: Decode fail (not dataCorrupted but specific like key/type/value not found), assume incomplete or malformed. Buffer: \(currentBuffer.count). Waiting more data for \(String(bufferKey.peripheralID.uuidString.prefix(8))). This might be an issue if the sender is sending bad data.", level: .warning)
+                 } else {
+                     log("Central/PeerDelegate: Buffer too large (\(currentBuffer.count)) and still fail decode with non-corrupt error. Giving up \(String(bufferKey.peripheralID.uuidString.prefix(8))).", level: .error)
+                     DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Buffer limit exceeded decoding.")) }
+                     incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+                 }
+            } catch {
+                log("Central/PeerDelegate: GENERIC UNEXPECTED DECODE ERROR \(String(bufferKey.peripheralID.uuidString.prefix(8))). Buffer: \(currentBuffer.count). Error: \(error.localizedDescription)", level: .error)
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Generic error decode peer card: \(error.localizedDescription)")) }
+                incomingDataBuffers[bufferKey] = nil; centralManager.cancelPeripheralConnection(peripheral);
+            }
+        } else {
+            log("Central/PeerDelegate: Updated value for unexpected characteristic: \(String(characteristic.uuid.uuidString.prefix(8))) from \(String(peripheral.identifier.uuidString.prefix(8)))")
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard connectingOrConnectedPeer?.identifier == peripheral.identifier else { return } // // only care about current peer
+        if let err = error { log("Central/PeerDelegate: Error reading RSSI for '\(peripheral.name ?? "")': \(err.localizedDescription)", level: .warning); return }
+        log("Central/PeerDelegate: Updated RSSI for '\(peripheral.name ?? "")' to \(RSSI.intValue).")
+        peerRSSICache[peripheral.identifier] = RSSI
+    }
+
+    // MARK: - CBPeripheralManagerDelegate
+    func peripheralManagerDidUpdateState(_ manager: CBPeripheralManager) {
+        log("blemanager: peripheralmanagerdidupdatestate FIRED! state: \(manager.state.rawValue)") // <--- new log
+        DispatchQueue.main.async { self.delegate?.bleManagerDidUpdateState(bluetoothState: manager.state) }
+        switch manager.state {
+        case .poweredOn: log("Peripheral Manager: Bluetooth ON."); setupServiceAndStartAdvertising()
+        case .poweredOff:
+            log("Peripheral Manager: Bluetooth OFF.", level: .warning)
+            DispatchQueue.main.async {
+                self.isAdvertising = false
+                self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT Off (Peripheral)"))
+            }
+            ongoingNotificationSends.removeAll()
+        case .unauthorized:
+            log("Peripheral Manager: BT unauthorized.", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.bluetoothUnavailable("BT permissions not granted peripheral.")) }
+        case .resetting:
+            log("Peripheral Manager: BT resetting.", level: .warning)
+            ongoingNotificationSends.removeAll()
+        default: log("Peripheral Manager: State changed to \(manager.state.rawValue)", level: .info)
+        }
+    }
+
+    func peripheralManager(_ manager: CBPeripheralManager, didAdd service: CBService, error: Error?) {
+        if let err = error {
+            log("Peripheral/MgrDelegate: Error adding service \(String(service.uuid.uuidString.prefix(8))): \(err.localizedDescription)", level: .error)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.serviceSetupFailed("Fail add BLE svc: \(err.localizedDescription)")) }
+            return
+        }
+        log("Peripheral/MgrDelegate: Service \(String(service.uuid.uuidString.prefix(8))) added. Attempting start advertising...")
+        actuallyStartAdvertising()
+    }
+
+    func peripheralManagerDidStartAdvertising(_ manager: CBPeripheralManager, error: Error?) {
+        if let err = error {
+            log("Peripheral/MgrDelegate: Fail start advertising: \(err.localizedDescription)", level: .error)
+            DispatchQueue.main.async {
+                self.isAdvertising = false
+                self.delegate?.bleManagerDidEncounterError(.advertisingFailed("Fail start advertising: \(err.localizedDescription)"))
+            }
+            return
+        }
+        log("Peripheral/MgrDelegate: STARTED ADVERTISING StreetPass service.")
+        DispatchQueue.main.async { self.isAdvertising = true }
+        if let char = self.encounterCardMutableCharacteristic {
+            do {
+                let cardData = try jsonEncoder.encode(self.localUserCard)
+                char.value = cardData
+                log("Peripheral/MgrDelegate: Set initial char value on ad start. Size: \(cardData.count).")
+            }
+            catch { log("Peripheral/MgrDelegate: Error encode card for initial char value: \(error.localizedDescription)", level: .error) }
+        }
+    }
+
+    func peripheralManager(_ manager: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
+        let centralIDPart = String(request.central.identifier.uuidString.prefix(8))
+        log("Peripheral/MgrDelegate: Read Request Char UUID \(String(request.characteristic.uuid.uuidString.prefix(8))) from Central \(centralIDPart). Offset: \(request.offset). Central Max Update: \(request.central.maximumUpdateValueLength)")
+        
+        guard request.characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID else {
+            log("Peripheral/MgrDelegate: Read req UNKNOWN char (\(request.characteristic.uuid.uuidString)). Responding 'AttributeNotFound'.", level: .warning)
+            manager.respond(to: request, withResult: .attributeNotFound); return
+        }
+        
+        do {
+            var cardToSend = self.localUserCard; cardToSend.lastUpdated = Date()
+            let fullCardData = try jsonEncoder.encode(cardToSend)
+            log("Peripheral/MgrDelegate: Total card data size for read: \(fullCardData.count) bytes for Central \(centralIDPart).")
+
+            if request.offset >= fullCardData.count {
+                if request.offset > fullCardData.count {
+                    manager.respond(to: request, withResult: .invalidOffset); return
+                }
+            }
+            
+            if let chunkToSend = fullCardData.subdataIfAppropriate(offset: request.offset, maxLength: request.central.maximumUpdateValueLength) {
+                 request.value = chunkToSend
+                 log("Peripheral/MgrDelegate: Responding Central \(centralIDPart) with \(chunkToSend.count) bytes (offset \(request.offset)). Success.")
+                 manager.respond(to: request, withResult: .success)
+            } else {
+                log("Peripheral/MgrDelegate: Subdata generation failed for read request. Offset: \(request.offset), MaxLength: \(request.central.maximumUpdateValueLength). Responding InvalidOffset.", level: .error)
+                manager.respond(to: request, withResult: .invalidOffset)
+            }
+
+        } catch {
+            log("Peripheral/MgrDelegate: Error encoding local card for read response: \(error.localizedDescription)", level: .error)
+            manager.respond(to: request, withResult: .unlikelyError)
+            DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataSerializationError("Encode card read response fail: \(error.localizedDescription)")) }
+        }
+    }
+
+    func peripheralManager(_ manager: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        for request in requests {
+            let centralID = request.central.identifier
+            let centralIDPart = String(centralID.uuidString.prefix(8))
+            log("Peripheral/MgrDelegate: Write Request Char UUID \(String(request.characteristic.uuid.uuidString.prefix(8))) from Central \(centralIDPart). Length: \(request.value?.count ?? 0). Offset: \(request.offset)")
+
+            guard request.characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID else {
+                log("Peripheral/MgrDelegate: Write UNKNOWN char from \(centralIDPart). Respond 'AttributeNotFound'.", level: .warning)
+                manager.respond(to: request, withResult: .attributeNotFound); continue
+            }
+            guard let dataChunk = request.value else {
+                log("Peripheral/MgrDelegate: Write EMPTY data from \(centralIDPart). Respond 'InvalidAttributeValueLength'.", level: .warning)
+                manager.respond(to: request, withResult: .invalidAttributeValueLength); continue
+            }
+
+            var currentBuffer = incomingWriteBuffers[centralID, default: Data()]
+            
+            if request.offset == 0 && !currentBuffer.isEmpty && dataChunk.count < currentBuffer.count {
+                log("Peripheral/MgrDelegate: Write request offset 0, assuming new message from \(centralIDPart), clearing previous buffer (\(currentBuffer.count) bytes).", level: .info)
+                currentBuffer = Data()
+            }
+            currentBuffer.append(dataChunk)
+            incomingWriteBuffers[centralID] = currentBuffer
+            log("Peripheral/MgrDelegate: Accumulated write buffer for \(centralIDPart) is now \(currentBuffer.count) bytes.")
+
+            do {
+                let receivedCard = try jsonDecoder.decode(EncounterCard.self, from: currentBuffer)
+                log("Peripheral/MgrDelegate: DECODED card from '\(receivedCard.displayName)' (Central \(centralIDPart)) via write. Processing...", level: .info)
+                processAndStoreReceivedCard(receivedCard, rssi: nil)
+                incomingWriteBuffers[centralID] = nil
+                manager.respond(to: request, withResult: .success)
+            } catch let decodingError as DecodingError {
+                log("Peripheral/MgrDelegate: DECODING card from Central \(centralIDPart) (write) FAILED (possibly incomplete): \(decodingError.localizedDescription). Current buffer size: \(currentBuffer.count)", level: .info)
+                manager.respond(to: request, withResult: .success)
+                if case .dataCorrupted = decodingError {
+                    log("peripheral/mgrdelegate: write data corrupted from \(centralIDPart). buffer not cleared yet, waiting for more or disconnect.", level: .error)
+                }
+
+            } catch {
+                log("Peripheral/MgrDelegate: GENERIC UNEXPECTED DECODE ERROR from Central \(centralIDPart) (write): \(error.localizedDescription). Size: \(currentBuffer.count)", level: .error)
+                manager.respond(to: request, withResult: .unlikelyError)
+                incomingWriteBuffers[centralID] = nil
+                DispatchQueue.main.async { self.delegate?.bleManagerDidEncounterError(.dataDeserializationError("Decode peer card write (Central \(centralIDPart)) fail: \(error.localizedDescription)")) }
+            }
+        }
+    }
+
+    func peripheralManager(_ manager: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
+        guard characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID else {
+            log("Peripheral/MgrDelegate: Central \(String(central.identifier.uuidString.prefix(8))) subscribed unexpected char \(String(characteristic.uuid.uuidString.prefix(8)))", level: .warning); return }
+        let centralIDPart = String(central.identifier.uuidString.prefix(8))
+        log("Peripheral/MgrDelegate: Central \(centralIDPart) SUBSCRIBED to EncounterCard char (\(String(characteristic.uuid.uuidString.prefix(8)))).")
+        
+        if !subscribedCentrals.contains(where: { $0.identifier == central.identifier }) {
+            subscribedCentrals.append(central)
+            log("Peripheral/MgrDelegate: Added Central \(centralIDPart) to subscribed list. Count: \(subscribedCentrals.count).")
+        }
+        
+        do {
+            var cardToSend = self.localUserCard; cardToSend.lastUpdated = Date()
+            let cardData = try jsonEncoder.encode(cardToSend)
+            
+            log("Peripheral/MgrDelegate: Initiating chunked notification send (\(cardData.count) bytes) to new subscriber \(centralIDPart).")
+            ongoingNotificationSends[central.identifier] = PeripheralChunkSendOperation(
+                central: central,
+                characteristicUUID: characteristic.uuid,
+                data: cardData
+            )
+            attemptToSendNextNotificationChunk(for: central.identifier)
+            
+        } catch {
+            log("Peripheral/MgrDelegate: Error encode card for initial notify to \(centralIDPart): \(error.localizedDescription)", level: .error)
+        }
+    }
+
+    func peripheralManager(_ manager: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
+        guard characteristic.uuid == StreetPassBLE_UUIDs.encounterCardCharacteristicUUID else { return }
+        let centralIDPart = String(central.identifier.uuidString.prefix(8))
+        log("Peripheral/MgrDelegate: Central \(centralIDPart) UNSUBSCRIBED from EncounterCard char.")
+        subscribedCentrals.removeAll { $0.identifier == central.identifier }
+        log("Peripheral/MgrDelegate: Removed Central \(centralIDPart) from subscribed list. Count: \(subscribedCentrals.count).")
+        ongoingNotificationSends.removeValue(forKey: central.identifier)
+        incomingWriteBuffers.removeValue(forKey: central.identifier)
+    }
+    
+    func peripheralManagerIsReady(toUpdateSubscribers manager: CBPeripheralManager) {
+        log("Peripheral/MgrDelegate: Peripheral manager ready to update subscribers again.")
+        for centralID in ongoingNotificationSends.keys {
+             log("peripheral/mgrdelegate: isreadytoupdatesubscribers - retrying send for central \(String(centralID.uuidString.prefix(8)))")
+             attemptToSendNextNotificationChunk(for: centralID)
+        }
+    }
+}
+
+// MARK: - Data Extension
+extension Data {
+    func subdataIfAppropriate(offset: Int, maxLength: Int) -> Data? {
+        guard offset >= 0 else { log_ble_data_helper("Invalid offset: \(offset)."); return nil }
+        guard maxLength > 0 else { log_ble_data_helper("Invalid maxLength: \(maxLength). Usually means central is not ready or MTU is tiny."); return nil }
+        
+        if offset > self.count {
+            log_ble_data_helper("Offset \(offset) > data length \(self.count). Responding InvalidOffset (nil from here).")
+            return nil
+        }
+        if offset == self.count {
+            log_ble_data_helper("Offset \(offset) == data length \(self.count). Returning empty Data for end-of-data read.")
+            return Data()
+        }
+        
+        let availableLength = self.count - offset
+        let lengthToReturn = Swift.min(availableLength, maxLength)
+        
+        let startIndex = self.index(self.startIndex, offsetBy: offset)
+        let endIndex = self.index(startIndex, offsetBy: lengthToReturn)
+        log_ble_data_helper("Subdata: Total \(self.count), Offset \(offset), MaxLengthCentral \(maxLength), Available \(availableLength), Return \(lengthToReturn).")
+        return self.subdata(in: startIndex..<endIndex)
+    }
+}
+
+// MARK: - CBCharacteristicProperties Extension
+extension CBCharacteristicProperties {
+    var description: String {
+        var descriptions: [String] = []
+        if contains(.broadcast) { descriptions.append("broadcast") }
+        if contains(.read) { descriptions.append("read") }
+        if contains(.writeWithoutResponse) { descriptions.append("writeNoResp") }
+        if contains(.write) { descriptions.append("write") }
+        if contains(.notify) { descriptions.append("notify") }
+        if contains(.indicate) { descriptions.append("indicate") }
+        if contains(.authenticatedSignedWrites) { descriptions.append("authSignedWrites") }
+        if contains(.extendedProperties) { descriptions.append("extProps") }
+        if contains(.notifyEncryptionRequired) { descriptions.append("notifyEncReq") }
+        if contains(.indicateEncryptionRequired) { descriptions.append("indicateEncReq") }
+        if descriptions.isEmpty { return "none" }
+        return descriptions.joined(separator: ", ")
+    }
+}
+
+fileprivate func log_ble_data_helper(_ message: String) {
+    print("streetpassble/datahelper: \(message)")
+}
+
+
+StreetPassViewModel.swift
+-------------------------
+// StreetPassViewModel.swift
+// this is the app's brain. it holds all the state and talks to the bluetooth stuff.
+
+import SwiftUI
+import CoreBluetooth
+import Combine
+import UIKit
+
+@MainActor
+class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
+
+    // the manager is now an optional, because we're creating it *after* init.
+    // this is the key to the whole damn thing.
+    @Published var bleManager: StreetPassBLEManager!
+    private var bleManagerCancellable: AnyCancellable?
+    
+    // state for all the different UI parts
+    @Published var isEditingMyCard: Bool = false
+    @Published var cardForEditor: EncounterCard
+    @Published var lastErrorMessage: String? = nil
+    @Published var lastInfoMessage: String? = nil
+    @Published var isDrawingSheetPresented: Bool = false
+    
+    // quick shortcuts for the views to grab data
+    // we have to check if the manager exists, otherwise... boom.
+    var myCurrentCard: EncounterCard { bleManager?.localUserCard ?? EncounterCard(userID: self.userID) }
+    var recentlyEncounteredCards: [EncounterCard] { bleManager?.receivedCards.sorted(by: { $0.lastUpdated > $1.lastUpdated }) ?? [] }
+    var bleActivityLog: [String] { bleManager?.activityLog ?? [] }
+    var isBluetoothOn: Bool { bleManager?.isBluetoothPoweredOn ?? false }
+    var isScanningActive: Bool { bleManager?.isScanning ?? false }
+    var isAdvertisingActive: Bool { bleManager?.isAdvertising ?? false }
+
+    // more state for the pretty UI
+    @Published var greetingName: String = "david"
+    @Published var newCardsCountForBanner: Int = 0
+    
+    private let userID: String
+
+    init(userID: String) {
+        // the init is now DUMB. it does nothing but set a default value.
+        // no bluetooth, no file loading, no deadlocks.
+        self.userID = userID
+        self.cardForEditor = EncounterCard(userID: userID)
+        print("ViewModel created, but it's just chilling for now. No bluetooth code has been touched.")
+    }
+
+    // THIS IS OUR NEW HERO. WE CALL THIS *AFTER* THE LOADING SCREEN IS VISIBLE.
+    func setup() async {
+        // if we already set up, don't do it again.
+        guard self.bleManager == nil else { return }
+        
+        logViewModel("Ok, for real this time. The UI is stable. Activating the ViewModel and creating BLE Manager.")
+        
+        let initialBLEManager = StreetPassBLEManager(userID: self.userID)
+        self.bleManager = initialBLEManager
+        
+        self.bleManager.delegate = self
+        bindBLEManager()
+        
+        self.bleManager.loadLocalUserCardFromPersistence()
+        
+        // now that we have real data, update the published properties
+        self.cardForEditor = self.bleManager.localUserCard
+        self.greetingName = self.bleManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
+        self.newCardsCountForBanner = self.bleManager.receivedCards.count
+        
+        // a little delay just to be safe and let any queued UI events settle.
+        try? await Task.sleep(nanoseconds: 1_000_000) // 1 millisecond
+        
+        logViewModel("Activation complete. All systems are go.")
+    }
+
+    private func logViewModel(_ message: String) {
+        // gotta check if the manager exists before we try to use it for logging
+        if bleManager != nil {
+            bleManager.log("ViewModel: \(message)")
+        } else {
+            print("ViewModel (pre-activation): \(message)")
+        }
+    }
+
+    private func bindBLEManager() {
+        // just making sure the viewmodel knows what's up when the ble manager does stuff. it's like gossip.
+        bleManagerCancellable = bleManager.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+
+    // MARK: - UI Actions
+    func toggleStreetPassServices() {
+        if isScanningActive || isAdvertisingActive {
+            bleManager.stop()
+            showInfoMessage("streetpass services stopped.")
+        } else {
+            bleManager.start()
+            showInfoMessage("streetpass services starting...")
+        }
+        lastErrorMessage = nil
+    }
+
+    func clearAllEncounteredCards() {
+        bleManager.clearReceivedCardsFromPersistence()
+        showInfoMessage("all encountered cards have been cleared.")
+        self.newCardsCountForBanner = 0
+    }
+
+    func prepareCardForEditing() {
+        self.cardForEditor = self.bleManager.localUserCard
+        isEditingMyCard = true
+        lastErrorMessage = nil
+        lastInfoMessage = nil
+        logViewModel("Preparing card editor with a copy of the current local card.")
+    }
+    
+    func cancelCardEditing() {
+        isEditingMyCard = false
+        logViewModel("Card editing cancelled. Changes to editor card are discarded.")
+    }
+
+    func saveMyEditedCard() {
+        logViewModel("Attempting to save edited card...")
+        if cardForEditor.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            showErrorMessage("display name cannot be empty."); return
+        }
+        if cardForEditor.statusMessage.count > 150 {
+            showErrorMessage("status message is too long (max 150 characters)."); return
+        }
+        
+        var cardToSave = self.cardForEditor
+        cardToSave.lastUpdated = Date()
+
+        if bleManager.localUserCard.isContentDifferent(from: cardToSave) {
+            logViewModel("Card content changed. Generating new ID for the card and saving.")
+            cardToSave.id = UUID()
+        } else {
+            logViewModel("Card content (text and drawing) unchanged from current. Only timestamp updated.")
+            cardToSave.id = bleManager.localUserCard.id
+        }
+
+        bleManager.updateLocalUserCard(newCard: cardToSave)
+        
+        self.cardForEditor = cardToSave
+        self.greetingName = cardToSave.displayName.split(separator: " ").first.map(String.init) ?? "user"
+
+        isEditingMyCard = false
+        showInfoMessage("your encounter card has been updated!")
+        logViewModel("Local card saved. Drawing data size: \(cardToSave.drawingData?.count ?? 0) bytes.")
+    }
+    
+    func refreshCardInEditor() {
+        prepareCardForEditing()
+        logViewModel("Editor card explicitly refreshed to match current local card.")
+    }
+    
+    func refreshUIDataFromPull() {
+        logViewModel("UI pull-to-refresh action triggered by user.")
+        self.greetingName = self.bleManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
+        self.newCardsCountForBanner = self.bleManager.receivedCards.count
+        objectWillChange.send()
+        bleManager.objectWillChange.send()
+    }
+
+    // MARK: - Drawing Actions
+    func openDrawingEditor() {
+        isDrawingSheetPresented = true
+    }
+    
+    func removeDrawingFromCard() {
+        if cardForEditor.drawingData != nil {
+            cardForEditor.drawingData = nil
+            logViewModel("Drawing removed from card in editor. Save the card to make this change permanent.")
+            showInfoMessage("drawing removed. save your card to apply changes.")
+            objectWillChange.send()
+        }
+    }
+
+    // MARK: - UI Feedback Helpers
+    func showErrorMessage(_ message: String) {
+        DispatchQueue.main.async {
+            self.lastErrorMessage = message
+            self.lastInfoMessage = nil
+        }
+    }
+
+    func showInfoMessage(_ message: String) {
+        DispatchQueue.main.async {
+            self.lastInfoMessage = message
+            self.lastErrorMessage = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                if self.lastInfoMessage == message {
+                    self.lastInfoMessage = nil
+                }
+            }
+        }
+    }
+    
+    func showInfoMessageForCopyToClipboard(_ message: String) {
+        showInfoMessage(message)
+    }
+
+    // MARK: - Reset & Restart Logic
+    func resetAllData() {
+        logViewModel("Resetting all StreetPass data and generating new user ID.")
+        bleManager.stop()
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "streetPass_PersistentUserID_v1")
+        defaults.removeObject(forKey: "streetPass_LocalUserCard_v2")
+        defaults.removeObject(forKey: "streetPass_ReceivedCards_v2")
+        let newID = UUID().uuidString
+        defaults.set(newID, forKey: "streetPass_PersistentUserID_v1")
+        
+        // create a whole new manager
+        let freshManager = StreetPassBLEManager(userID: newID)
+        self.bleManager = freshManager
+        bindBLEManager()
+
+        self.cardForEditor = freshManager.localUserCard
+        self.greetingName = freshManager.localUserCard.displayName.split(separator: " ").first.map(String.init) ?? "user"
+        self.newCardsCountForBanner = 0
+        self.lastErrorMessage = nil
+        self.lastInfoMessage = nil
+        bleManager.start()
+        objectWillChange.send()
+    }
+
+    // MARK: - StreetPassBLEManagerDelegate Conformance
+    func bleManagerDidUpdateState(bluetoothState: CBManagerState) {
+        logViewModel("Delegate: Bluetooth state reported as \(bluetoothState.rawValue)")
+        switch bluetoothState {
+        case .poweredOff: showErrorMessage("bluetooth is currently powered off.")
+        case .unauthorized: showErrorMessage("streetpass needs bluetooth permission. please enable it in settings.")
+        case .unsupported: showErrorMessage("this device doesn't support bluetooth low energy features required by streetpass.")
+        case .poweredOn:
+            if lastErrorMessage?.contains("bluetooth") == true { lastErrorMessage = nil }
+            showInfoMessage("bluetooth is on. streetpass is active or ready.")
+        default:
+            logViewModel("Delegate: Bluetooth state is \(bluetoothState.rawValue)")
+            // lol idk what to do here, so we do nothing.
+            break
+        }
+    }
+
+    func bleManagerDidReceiveCard(_ card: EncounterCard, rssi: NSNumber?) {
+        logViewModel("Delegate: New card received from '\(card.displayName)'. Drawing: \(card.drawingData != nil ? "\(card.drawingData!.count) bytes" : "No"). RSSI: \(rssi?.stringValue ?? "N/A")")
+        showInfoMessage("new encounter card from \(card.displayName)!")
+        self.newCardsCountForBanner = self.bleManager.receivedCards.count
+        #if os(iOS)
+        UINotificationFeedbackGenerator().notificationOccurred(.success) // buzz buzz
+        #endif
+    }
+            
+    func bleManagerDidUpdateLog(_ message: String) {
+        // the view can just read the log array directly, so this is just here vibing
+    }
+
+    func bleManagerDidEncounterError(_ error: StreetPassBLEError) {
+        logViewModel("Delegate: Error from BLE Manager - \(error.localizedDescription)")
+        showErrorMessage(error.localizedDescription)
+    }
+}
+
+
+LoadingView.swift
+-----------------
+
+// LoadingView.swift
+// this is our bouncer. its only job is to stand at the door,
+// wait for the app to be ready, and then let us into the club.
+
+import SwiftUI
+
+struct LoadingView: View {
+    // it gets the viewmodel and a secret password (the onFinished closure)
+    @ObservedObject var viewModel: StreetPassViewModel
+    var onFinished: () -> Void
+
+    var body: some View {
+        ProgressView("Starting StreetPass…")
+            .task {
+                // .task is smart. it runs this async block when the view appears.
+                // this is where we tell the viewmodel: "ok, go do your bluetooth shit now."
+                await viewModel.setup()
+                
+                // once setup() is 100% done, we call the secret password closure
+                // to tell the main app view it's time to switch.
+                onFinished()
+            }
+    }
+}
+
+

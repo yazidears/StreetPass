@@ -43,7 +43,7 @@ fileprivate struct PulsatingModifier: ViewModifier {
         content
             .opacity(active && isPulsing ? minOpacity : 1.0)
             .scaleEffect(active && isPulsing ? maxScale : 1.0)
-            .onChange(of: active, initial: true) { oldActive, newActive in
+            .onChange(of: active, initial: true) { oldActive, newActive in // Corrected signature for older Swift if needed, but your code had newActive
                 if newActive {
                     isPulsing = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
@@ -122,10 +122,12 @@ struct StreetPass_MainView: View {
 
     @State private var showHeaderAvatar = false
     @State private var showHeaderGreeting = false
-    @State private var showMainContent = false
+    @State private var showMainContent = false // Key state for conditional rendering
     @State private var scrollOffset: CGFloat = 0
     @State private var timeBasedGreeting: String = ""
     @State private var showResetAlert: Bool = false
+    @State private var isMyCardEditorPresented = false
+
 
 
     @AppStorage("favorite_user_ids_json_v1") private var _appStorageFavoriteUserIDsJSON: String = "[]"
@@ -169,7 +171,7 @@ struct StreetPass_MainView: View {
     init(isForSwiftUIPreview: Bool = false) {
         self.isForSwiftUIPreview = isForSwiftUIPreview
         _timeBasedGreeting = State(initialValue: getTimeBasedGreetingLogic())
-        print("streetpass_mainview: init happening! am i the problem?") // <-- this one
+        print("streetpass_mainview: init happening!") // Added your print back
     }
     
     private func getTimeBasedGreetingLogic() -> String {
@@ -177,31 +179,31 @@ struct StreetPass_MainView: View {
         let greetings: [String]
 
         switch hour {
-        case 4..<7: // Early Morning (4 AM - 6:59 AM)
+        case 4..<7:
             greetings = [
                 "Early bird, huh?", "Sun's barely up, good to see ya!", "Morning's quiet magic is here.",
                 "Hope you've got coffee brewing!", "Dawn's breaking, how are you?", "A fresh start to the day!",
                 "Quiet moments before the rush.", "Wishing you a peaceful morning."
             ]
-        case 7..<12: // Morning (7 AM - 11:59 AM)
+        case 7..<12:
             greetings = [
                 "Good mornin'!", "Hope your day's off to a great start!", "Bright morning to ya!",
                 "What's the plan for today?", "Enjoying the morning vibes?", "Hello there, sunshine!",
                 "May your coffee be strong today!", "Ready to seize the day?"
             ]
-        case 12..<17: // Afternoon (12 PM - 4:59 PM)
+        case 12..<17:
             greetings = [
                 "Good afternoon!", "Hope your afternoon is going well.", "How's the day treating you?",
                 "Taking a break, or powering through?", "Afternoon vibes are in full swing!", "Sun's high, hope your spirits are too!",
                 "Keep that energy up!", "Making the most of the afternoon?"
             ]
-        case 17..<21: // Evening (5 PM - 8:59 PM)
+        case 17..<21:
             greetings = [
                 "Good evening!", "How's the evening treating you?", "Winding down, or just getting started?",
                 "Hope you had a wonderful day.", "Evening's here, time to relax a bit!", "The stars will be out soon.",
                 "Enjoy the evening calm.", "What's cookin' tonight? Smells good!"
             ]
-        default: // Late Night (9 PM - 3:59 AM)
+        default:
             greetings = [
                 "Burning the midnight oil?", "Late night explorer, I see.", "Hope you're having a peaceful night.",
                 "The world's quiet now, isn't it?", "Sweet dreams, or more adventures ahead?", "Night owl greetings to you!",
@@ -213,10 +215,6 @@ struct StreetPass_MainView: View {
 
 
     var body: some View {
-        // this view doesn't decide what to show anymore. it just shows itself.
-        // the logic is now up in streetpassapp.swift, where it belongs.
-        // print("streetpass_mainview: body evaluating") // keep this for now, or remove if too noisy
-
         let allCards = viewModel.recentlyEncounteredCards
         let lowercasedSearchText = searchText.trimming.lowercased()
         let filteredCards: [EncounterCard] = {
@@ -233,11 +231,11 @@ struct StreetPass_MainView: View {
         }
 
         return NavigationStack {
-            mainContent(sortedCards: sortedCards) // we'll simplify mainContent's onAppear animations next if needed
+            mainContent(sortedCards: sortedCards)
                 .background(AppTheme.backgroundColor.ignoresSafeArea())
-                // .background(DeviceShakeView()) // <-- temporarily commented out
+                // .background(DeviceShakeView()) // MODIFICATION: Still commented for this test
                 .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
-                    print("streetpass_mainview: device did shake notification received")
+                    print("streetpass_mainview: device did shake notification received") // Your print
                     showResetAlert = true
                 }
                 .alert("Reset StreetPass?", isPresented: $showResetAlert) {
@@ -247,84 +245,110 @@ struct StreetPass_MainView: View {
                     Text("This will erase all data and restart StreetPass.")
                 }
                 .onAppear {
-                    print("streetpass_mainview: main body .onappear triggered")
+                    print("streetpass_mainview: (wrapper of mainContent) .onappear triggered") // Your print
                     timeBasedGreeting = getTimeBasedGreetingLogic()
-                    // initial animations are a common source of startup lag.
-                    // let's disable them for a sec to see if the core view loads.
-                    // if this works, we can re-enable them more carefully, maybe with a slight delay.
                     
-                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
-                    //     showHeaderAvatar = true
-                    // }
-                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
-                    //     showHeaderGreeting = true
-                    // }
-                    // withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.4)) {
-                    //      showMainContent = true
-                    // }
-                    
-                    // instead, set them directly for now
-                    showHeaderAvatar = true
-                    showHeaderGreeting = true
-                    showMainContent = true
-                    print("streetpass_mainview: onappear - flags set directly (no animation)")
+                    // MODIFICATION: Delay setting these flags to allow BLE to init
+                    Task {
+                        try? await Task.sleep(nanoseconds: 70_000_000) // 0.07 seconds delay
+                        print("streetpass_mainview: (wrapper of mainContent) .onappear - setting flags AFTER DELAY") // Your print
+                        
+                        // Using your original animation calls here, triggered after the delay
+                        withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.1)) {
+                            showHeaderAvatar = true
+                        }
+                        withAnimation(.interpolatingSpring(stiffness: 100, damping: 12).delay(0.25)) {
+                            showHeaderGreeting = true
+                        }
+                        // showMainContent will be set without its own withAnimation here,
+                        // the overall delay is handled by Task.sleep.
+                        // The animations inside mainContent will use this showMainContent value.
+                        // The original animation for showMainContent itself was:
+                        // withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.4)) { showMainContent = true }
+                        // We can simplify this by just setting it, relying on the Task's delay
+                        // and the internal animations of mainContent's children.
+                        // Or, add its own withAnimation here too if preferred. For now, direct set:
+                        self.showMainContent = true
+                         print("streetpass_mainview: (wrapper of mainContent) .onappear - flags set. showMainContent is now \(self.showMainContent)") // Your print
+                    }
                 }
+                .sheet(isPresented: $isMyCardEditorPresented) { // <--- PUT IT HERE
+                                    MyCardEditorView()
+                                        .environmentObject(viewModel)
+                                }
         }
     }
 
     @ViewBuilder
     private func mainContent(sortedCards: [EncounterCard]) -> some View {
-        ScrollViewOffsetTracker(scrollOffset: $scrollOffset) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    headerSection()
-                    
-                    searchBar
-                        .padding(.top, -30)
-                        .zIndex(1)
+        // MODIFICATION: Conditionally render the complex UI
+        if showMainContent {
+            // Original complex UI is rendered here, with its original animations
+            ScrollViewOffsetTracker(scrollOffset: $scrollOffset) {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        headerSection() // Animations inside here are driven by showHeaderAvatar/Greeting
+                        
+                        searchBar
+                            .padding(.top, -30)
+                            .zIndex(1)
+                            // Original animation logic, triggered by showMainContent
+                            .opacity(showMainContent ? 1 : 0)
+                            .offset(y: showMainContent ? 0 : 20)
+                            .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.1 : 0.4), value: showMainContent)
+
+                        LazyVStack(alignment: .leading, spacing: 24) {
+                            RecentCardsSwappedSectionView(
+                                viewModel: viewModel
+                            ) {
+                                viewModel.showInfoMessage("view all recent cards tapped!")
+                                HapticManager.shared.impact(style: .light)
+                            }
+
+                            StatusSectionView(viewModel: viewModel)
+
+                            Button {
+                                viewModel.prepareCardForEditing() // Prepare data in ViewModel
+                                // viewModel.openDrawingEditor() // We don't open drawing directly anymore
+                                self.isMyCardEditorPresented = true // Show our new full editor
+                                HapticManager.shared.impact(style: .medium)
+                            } label: {
+                                Label("Draw / Edit My Card", systemImage: "pencil.and.scribble")
+                                    .font(.headline.weight(.semibold))
+                                    .padding()
+                                    .frame(maxWidth: .infinity)
+                                    .background(AppTheme.spAccentYellow)
+                                    .foregroundColor(AppTheme.spPrimaryText)
+                                    .cornerRadius(12)
+                                    .shadow(color: AppTheme.spAccentYellow.opacity(0.5), radius: 8, y: 4)
+                            }
+                            .padding(.horizontal)
+                            .padding(.bottom)
+                            .buttonStyle(ScaleDownButtonStyle(scaleFactor: 0.95, opacityFactor: 0.9))
+                            
+                            connectionsSection(sortedCards: sortedCards)
+                        }
+                        .padding(.top)
+                         // Original animation logic, triggered by showMainContent
                         .opacity(showMainContent ? 1 : 0)
                         .offset(y: showMainContent ? 0 : 20)
-                        .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.1 : 0.4), value: showMainContent)
-
-                    LazyVStack(alignment: .leading, spacing: 24) {
-                        RecentCardsSwappedSectionView(
-                            viewModel: viewModel
-                        ) {
-                            viewModel.showInfoMessage("view all recent cards tapped!")
-                            HapticManager.shared.impact(style: .light)
-                        }
-
-                        StatusSectionView(viewModel: viewModel)
-
-                        Button {
-                            viewModel.prepareCardForEditing()
-                            viewModel.openDrawingEditor()
-                            HapticManager.shared.impact(style: .medium)
-                        } label: {
-                            Label("Draw / Edit My Card", systemImage: "pencil.and.scribble")
-                                .font(.headline.weight(.semibold))
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .background(AppTheme.spAccentYellow)
-                                .foregroundColor(AppTheme.spPrimaryText)
-                                .cornerRadius(12)
-                                .shadow(color: AppTheme.spAccentYellow.opacity(0.5), radius: 8, y: 4)
-                        }
-                        .padding(.horizontal)
-                        .padding(.bottom)
-                        .buttonStyle(ScaleDownButtonStyle(scaleFactor: 0.95, opacityFactor: 0.9))
-                        
-                        connectionsSection(sortedCards: sortedCards)
+                        .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.2 : 0.4), value: showMainContent)
                     }
-                    .padding(.top)
-                    .opacity(showMainContent ? 1 : 0)
-                    .offset(y: showMainContent ? 0 : 20)
-                    .animation(.interpolatingSpring(stiffness: 100, damping: 15).delay(showMainContent ? 0.2 : 0.4), value: showMainContent)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar(.hidden, for: .navigationBar)
+            .onAppear {
+                print("streetpass_mainview: actual mainContent (ScrollViewOffsetTracker) .onappear. showMainContent is \(self.showMainContent)") // Your print
+            }
+        } else {
+            // This placeholder is shown while showMainContent is false (during the initial delay)
+            ProgressView("mainContent UI loading...")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    print("streetpass_mainview: actual mainContent showing PLACEHOLDER because showMainContent is \(self.showMainContent)") // Your print
+                }
         }
-        .scrollDismissesKeyboard(.interactively)
-        .toolbar(.hidden, for: .navigationBar)
     }
 
     @ViewBuilder
@@ -356,6 +380,7 @@ struct StreetPass_MainView: View {
                         )
                         .clipShape(Circle())
                         .overlay(Circle().strokeBorder(Color.white.opacity(0.6), lineWidth: 2))
+                        // Animation driven by showHeaderAvatar (set in parent .onAppear)
                         .opacity(showHeaderAvatar ? 1 : 0)
                         .scaleEffect(showHeaderAvatar ? 1 : 0.7)
                         .offset(x: showHeaderAvatar ? 0 : -25, y: showHeaderAvatar ? 0 : 10)
@@ -381,6 +406,7 @@ struct StreetPass_MainView: View {
                                 .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
                         }
                     }
+                    // Animation driven by showHeaderGreeting (set in parent .onAppear)
                     .opacity(showHeaderGreeting ? 1 : 0)
                     .offset(x: showHeaderGreeting ? 0 : -25)
                 }
@@ -390,6 +416,9 @@ struct StreetPass_MainView: View {
             }
         }
         .frame(minHeight: headerHeight)
+        .onAppear{ // Added your print back
+             print("streetpass_mainview: headerSection .onappear. Flags - avatar:\(self.showHeaderAvatar), greeting:\(self.showHeaderGreeting)")
+        }
     }
 
     @ViewBuilder
@@ -486,6 +515,7 @@ struct StreetPass_MainView: View {
                                 }
                             )
                         ) {
+                            // This is your HStack that defines how each card row looks
                             HStack(spacing: 15) {
                                 card.getPlaceholderDrawingView()
                                     .frame(width: 55, height: 75)
@@ -520,10 +550,22 @@ struct StreetPass_MainView: View {
                             }
                             .padding()
                             .glassBackground(cornerRadius: 15, material: AppTheme.cardBackgroundColor, strokeColor: AppTheme.glassBorderSubtle, shadow: .soft)
-                            .contentShape(Rectangle())
+                            .contentShape(Rectangle()) // Ensures the whole area is tappable for NavigationLink
                         }
                         .buttonStyle(PlainButtonStyle())
                         .animation(.spring(response: 0.35, dampingFraction: 0.55), value: favoriteUserIDs.contains(card.userID))
+                        // --- ADD THE SWIPE ACTION MODIFIER BELOW ---
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) { // Or true if you want full swipe to delete
+                            Button(role: .destructive) {
+                                print("streetpass_mainview: attempting to forget user \(card.userID.prefix(8))")
+                                viewModel.forgetUser(userID: card.userID)
+                            } label: {
+                                Label("Forget", systemImage: "person.crop.circle.badge.xmark")
+                            }
+                            .tint(.red) // Optional: explicitly tint the button red
+                        }
+                        // --- END OF SWIPE ACTION MODIFIER ---
+                    
                     }
                 }
                 .padding(.horizontal)
@@ -555,7 +597,7 @@ struct RecentCardsSwappedSectionView: View {
     @ObservedObject var viewModel: StreetPassViewModel
     var onTapAll: () -> Void
     @State private var cardAppeared: [UUID: Bool] = [:]
-    @State private var sectionVisible = false
+    @State private var sectionVisible = false // This view manages its own visibility animation
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -571,6 +613,7 @@ struct RecentCardsSwappedSectionView: View {
                 }
             }
             .padding(.horizontal)
+            // Original animation logic based on its own sectionVisible
             .opacity(sectionVisible ? 1 : 0)
             .offset(y: sectionVisible ? 0 : 15)
 
@@ -611,21 +654,25 @@ struct RecentCardsSwappedSectionView: View {
                                 axis: (x: 0, y: 1, z: 0),
                                 anchor: .leading
                             )
+                            
                             .offset(y: cardAppeared[card.id, default: false] ? 0 : 15)
                             .onAppear {
+                                // Card animation depends on sectionVisible
                                 if sectionVisible {
                                     withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.08 * Double(index))) {
                                         cardAppeared[card.id] = true
                                     }
                                 }
                             }
-                            .onChange(of: sectionVisible) { _, newVisible in
+                            .onChange(of: sectionVisible) { _, newVisible in // Corrected for new Swift
                                 if newVisible {
-                                    withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.08 * Double(index))) {
-                                        cardAppeared[card.id] = true
+                                     if !cardAppeared[card.id, default: false] { // Animate if not already shown
+                                        withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.08 * Double(index))) {
+                                            cardAppeared[card.id] = true
+                                        }
                                     }
                                 } else {
-                                    cardAppeared[card.id] = false
+                                    cardAppeared[card.id] = false // Reset if section hides
                                 }
                             }
                         }
@@ -633,9 +680,13 @@ struct RecentCardsSwappedSectionView: View {
                     .padding(.vertical, 10)
                     .padding(.horizontal)
                 }
+                // ScrollView itself also animates with the section
+                 .opacity(sectionVisible ? 1 : 0)
             }
         }
-        .onAppear {
+        .onAppear { // This .onAppear triggers the animation for this whole section
+            print("streetpass_mainview: RecentCardsSwappedSectionView .onappear.") // Your print
+            // Original animation trigger for this section
             withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.1)) {
                 sectionVisible = true
             }
@@ -674,7 +725,7 @@ struct RecentCardItemView: View {
 
 struct StatusSectionView: View {
     @ObservedObject var viewModel: StreetPassViewModel
-    @State private var sectionVisible = false
+    @State private var sectionVisible = false // This view manages its own visibility animation
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -682,6 +733,7 @@ struct StatusSectionView: View {
                 .font(.title2.bold())
                 .foregroundColor(AppTheme.spPrimaryText)
                 .padding(.horizontal)
+                // Original animation based on its own sectionVisible
                 .opacity(sectionVisible ? 1 : 0)
                 .offset(y: sectionVisible ? 0 : 15)
 
@@ -692,7 +744,7 @@ struct StatusSectionView: View {
                     subtitle: viewModel.isBluetoothOn ? "Ready to connect" : "Enable Bluetooth for StreetPass",
                     iconName: viewModel.isBluetoothOn ? "antenna.radiowaves.left.and.right.circle.fill" : "antenna.radiowaves.left.and.right.slash.circle.fill",
                     mainColor: viewModel.isBluetoothOn ? AppTheme.positiveColor : AppTheme.warningColor,
-                    isPulsingActive: viewModel.isBluetoothOn
+                    isPulsingActive: viewModel.isBluetoothOn && sectionVisible // Pulse only if section is visible
                 )
                 .opacity(sectionVisible ? 1 : 0)
                 .offset(y: sectionVisible ? 0 : 15)
@@ -707,7 +759,7 @@ struct StatusSectionView: View {
                     subtitle: "Advertising: \(adStatus), Scanning: \(scanStatus)",
                     iconName: spassOverallStatus ? "network.badge.shield.half.filled" : "network.slash",
                     mainColor: spassOverallStatus ? AppTheme.positiveColor : AppTheme.primaryColor.opacity(0.8),
-                    isPulsingActive: spassOverallStatus
+                    isPulsingActive: spassOverallStatus && sectionVisible // Pulse only if section is visible
                 )
                 .opacity(sectionVisible ? 1 : 0)
                 .offset(y: sectionVisible ? 0 : 15)
@@ -715,7 +767,9 @@ struct StatusSectionView: View {
             }
             .padding(.horizontal)
         }
-        .onAppear {
+        .onAppear { // This .onAppear triggers the animation for this whole section
+            print("streetpass_mainview: StatusSectionView .onappear.") // Your print
+            // Original animation trigger for this section
             withAnimation(.interpolatingSpring(stiffness: 100, damping: 15).delay(0.2)) {
                 sectionVisible = true
             }

@@ -43,7 +43,14 @@ class StreetPassViewModel: ObservableObject, StreetPassBLEManagerDelegate {
         self.cardForEditor = EncounterCard(userID: userID)
         print("ViewModel created, but it's just chilling for now. No bluetooth code has been touched.")
     }
-
+    // In StreetPassViewModel.swift
+    func forgetUser(userID: String) {
+        bleManager.forgetEncounterForUser(userID: userID)
+        // You might want to refresh UI elements that depend on this, e.g., newCardsCountForBanner
+        // self.newCardsCountForBanner = self.bleManager.receivedCards.count
+        // objectWillChange.send() // ViewModel will update from bleManager's objectWillChange
+        showInfoMessage("encounter history for user \(userID.prefix(8))... cleared.")
+    }
     // THIS IS OUR NEW HERO. WE CALL THIS *AFTER* THE LOADING SCREEN IS VISIBLE.
     func setup() async {
         // if we already set up, don't do it again.
